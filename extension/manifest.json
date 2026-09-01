@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "JobCheck 登录态捕获助手",
+  "version": "0.3.0",
+  "description": "跳转招聘官网登录后自动捕获 Cookie 完成绑定；未支持网站可一键采样接入。只读。",
+  "action": {
+    "default_title": "JobCheck",
+    "default_popup": "popup.html"
+  },
+  "permissions": ["cookies", "tabs", "storage", "activeTab", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://localhost:5173/*", "http://127.0.0.1:5173/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

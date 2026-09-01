@@ -1,0 +1,172 @@
+/* JobCheck 全局样式 —— 视觉纪律：彩色只用于状态编码，其余为墨色/灰阶 */
+:root {
+  --paper: #fafbfc;
+  --card: #ffffff;
+  --ink: #1f2733;
+  --ink-2: #6b7684;
+  --ink-3: #9aa4b0;
+  --line: #e6eaf0;
+  --brand: #223a5e;
+  --brand-soft: #eef2f7;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app { height: 100%; margin: 0; }
+
+/* Naive UI 的 config-provider 会在 #app 内再包一层 div，必须传递高度 */
+#app > .n-config-provider { height: 100%; }
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: 'Space Grotesk', -apple-system, 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* 登录页等大面积留白处的点阵纸背景 */
+.dotgrid {
+  background-image: radial-gradient(#d8dee6 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* ── 看板布局 ─────────────────────────────── */
+.board-scroll {
+  flex: 1;
+  min-height: 0; /* flex 子项必须允许收缩，否则列高度塌陷、滚动条浮到页面中部 */
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0 24px 24px;
+}
+
+.board-columns {
+  display: flex;
+  gap: 14px;
+  flex: 1;
+  align-items: stretch;
+}
+
+.board-col {
+  flex: 0 0 264px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.board-col-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 2px solid var(--line);
+  margin-bottom: 10px;
+  flex: none;
+}
+
+.board-col-title { font-weight: 600; letter-spacing: 0.02em; }
+
+.board-col-count {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+  background: var(--brand-soft);
+  border-radius: 10px;
+  padding: 0 8px;
+}
+
+.board-col-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 60px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 40px;
+}
+
+.board-col.is-terminal .board-col-head { border-bottom-color: #f0f1f3; }
+.board-col.is-terminal .board-col-title { color: var(--ink-2); font-weight: 500; }
+
+/* ── 投递卡片：左侧状态色索引条是卡片唯一允许的彩色 ── */
+.app-card {
+  position: relative;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px 10px 16px;
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.app-card:hover { box-shadow: 0 4px 14px rgba(31, 39, 51, 0.08); transform: translateY(-1px); }
+.app-card:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+.app-card::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 8px; bottom: 8px;
+  width: 4px;
+  border-radius: 0 3px 3px 0;
+  background: var(--status-color, var(--ink-3));
+}
+
+.app-card .company { font-weight: 600; }
+.app-card .job { color: var(--ink); margin-top: 2px; }
+.app-card .meta { color: var(--ink-2); font-size: 12px; margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.app-card .time { color: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; margin-top: 6px; }
+
+.is-terminal .app-card { opacity: 0.78; }
+.is-terminal .app-card .company { font-weight: 500; }
+
+.src-badge {
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+.src-badge.is-auto { background: #eaf3ee; color: #2e7d4f; }
+
+/* ── 战线分布条（签名元素）── */
+.status-bar { display: flex; height: 10px; border-radius: 6px; overflow: hidden; background: var(--line); }
+.status-bar-seg { transition: filter 0.15s ease; cursor: pointer; }
+.status-bar-seg:hover { filter: brightness(1.12); }
+.status-bar-seg.is-active { outline: 2px solid var(--ink); outline-offset: -2px; }
+
+/* ── 详情时间线站点线 ── */
+.station-line { position: relative; padding-left: 6px; }
+.station-item { position: relative; padding: 0 0 18px 22px; }
+.station-item::before { /* 轨道 */
+  content: '';
+  position: absolute;
+  left: 5px; top: 14px; bottom: -4px;
+  width: 2px;
+  background: var(--line);
+}
+.station-item:last-child::before { display: none; }
+.station-dot {
+  position: absolute;
+  left: 0; top: 5px;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  border: 3px solid var(--card);
+  box-shadow: 0 0 0 2px var(--status-color, var(--ink-3));
+  background: var(--status-color, var(--ink-3));
+}
+.station-status { font-weight: 600; }
+.station-time { font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.station-raw { font-size: 12px; color: var(--ink-2); margin-top: 2px; }
+
+/* 细滚动条，保持浅色清爽 */
+::-webkit-scrollbar { width: 8px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #d3dae3; border-radius: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
