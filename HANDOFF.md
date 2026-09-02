@@ -1,11 +1,37 @@
 # HANDOFF — 交接文档（2026-09-02 更新，新链路已转正为唯一接入方式）
 
 > **新会话继续方式**：读 `REFACTOR_PLAN.md`（方案全文）+ 本文档（现场状态）。
-> 当前进度口令：「网易/炎魂 DOM 链路已通（真实数据验证），星环待 0.5.5 重测；128 passed」。
+> 当前进度口令：「v0.6.1 已推：applied 并入 screening + 看板『我的数据』侧边栏；
+> 星环 0.5.5 重测仍待做；143 passed」。
 >
 > 前几轮：M0 → M1 → 转正 → v0.5.2/0.5.3/0.5.4（加密捕获迭代）→ v0.5.5（DOM 兜底）
-> → dom 纳入哈希（网易 duplicate 事故）。本轮（2026-09-02 夜）：网易 DOM 链路首胜
-> + 炎魂三重事故修复（导航污染/初筛缺词/Moka 多租户）。基线 **128 passed**。
+> → dom 纳入哈希（网易 duplicate 事故）→ 网易 DOM 链路首胜 + 炎魂三重事故修复
+> → v0.6.1（「已投递」并入 screening + 我的数据侧边栏 + /api/me/stats）。基线 **143 passed**。
+
+## 0.05 v0.6.1：「已投递」状态移除 + 看板「我的数据」侧边栏（2026-09-02 夜，已推 4edf39d）
+
+**决策（用户拍板）**：「已投递」列长期无数据——归一化规则 screening 在 applied 之前
+且数字码走门户码表，同步入库几乎总落到更后阶段——无区分价值，**彻底移除该状态**
+（非仅删列），并入 screening（仿 closed→rejected 合并先例，原文语义由 raw_status_text 保留）。
+
+- 后端：`statuses.py` 删 applied、`DEFAULT_STATUS=screening`；normalize 规则
+  「已投递|投递成功」→ screening；飞书码表 `^0$`→screening（ingest + fingerprint 两处）；
+  models 列默认值；`main.py _ensure_columns` 幂等迁移 `UPDATE applications SET
+  current_status='screening' WHERE current_status='applied'`（当前库 0 条，防旧部署残留）。
+- 新 API `GET /api/me/stats`（`api/me.py`）：当前用户投递统计
+  total/in_progress/terminal/month_new/by_status（状态机序、count>0），
+  只统计本人、不受看板筛选影响；复用 admin applications_stats 聚合模式 + user_id 过滤。
+- 前端：`stages.ts` 删列（看板 5 进行中列）；`AppFormModal` 兜底默认 screening；
+  新组件 `SidePanel.vue`（投递总览 / 流程分布（点击即筛选看板，联动终态列展开与滚列）/
+  个人账号（邮箱/角色/注册时间/已连接站点/标签数/设置入口）三模块），
+  可折叠 + localStorage 记忆（窄屏 <1440 默认收起）；`BoardView` 改 board-body 横向布局，
+  StatusBar 顶部状态条保留（用户选择）。
+- prompt v2：`status_classify.md` 语义边界里 closed 残留并入 rejected（closed 状态
+  早前已并入 rejected，枚举本身是 `{{STATUS_ENUMS}}` 动态注入、自动跟随）。
+- 验证：143 passed 全量（含新增 me/stats 3 例：统计正确性 + 多用户隔离）；
+  `npm run build` 通过；浏览器实测（真实 admin 数据）：无已投递列、侧边栏数据与顶部
+  状态条一致、分布行点击筛选/再点清除、折叠展开刷新后保持、新建表单默认「简历评估中」。
+- 期间发现并处理：8000 端口旧后端实例占用（旧代码），已结束，现跑新代码；无插件改动。
 
 ## 0.1 炎魂三重事故与修复（2026-09-02 夜，纯服务端，未发插件）
 
@@ -94,7 +120,7 @@ popup duplicate 时显示「补建了 N 张缺失的卡片」。
 ## 0. 必须遵守的纪律（不变）
 
 - 「不要修了一个丢了上一个」：每个真实失败形态沉淀 golden/回归用例；
-- 任何改动后 `cd backend && python -m pytest -q` 全绿（当前基线 **119 passed**）；
+- 任何改动后 `cd backend && python -m pytest -q` 全绿（当前基线 **143 passed**）；
 - 既有真实流程改动后要线上复验；看板/手动记录/状态机/T2 分类零回归。
 
 ## 0.15 星环二测事故与 v0.5.3（2026-09-02 下午）
@@ -207,10 +233,12 @@ sites 双端点正常；冒烟数据已清理。
 
 ## 3. 环境现场快照（本轮会话结束）
 
-- **后端**：127.0.0.1:8000 在跑（后台任务，转正配置）；mock 飞书 8902、前端 5173 均在跑；
+- **后端**：127.0.0.1:8000 在跑（v0.6.1 代码）；mock 飞书 8902、前端 5173 当前未跑
+  （验证时临时起过 vite，验证完已停）；
 - **DB**：portal 6/8 现在带正确 hints（冒烟副产物，与真实契约一致）；binding 3/4/5
   数据保留但不再轮询；samples/recipes 历史未动；
-- **git**：初始提交后全部改动未提交（用户未要求）。
+- **git**：初始提交 → v0.6.0（扩展快照链路）→ v0.6.1（侧边栏 + applied 移除），
+  均已推 origin/main，工作区干净（2026-09-02 v0.6.1 会话末）。
 
 ## 4. 剩余工作（旧代码清理，无功能风险，按序机械执行）
 
@@ -228,7 +256,7 @@ REFACTOR_PLAN §3 M3 删除清单照旧，但已无闸门前置：
 
 ```bash
 cd backend
-python -m pytest -q                    # 全量回归（当前基线 118 passed）
+python -m pytest -q                    # 全量回归（当前基线 143 passed）
 # 后端已在跑；手动重启：杀 8000 进程后 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 # 指标观测（事后）：管理员登录后 GET /api/admin/snapshots/stats
 # 管理员：admin@jobcheck.dev / Admin12345

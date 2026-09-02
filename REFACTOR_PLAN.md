@@ -128,7 +128,9 @@ Cookie 并 AES 加密存储服务端，一并退役）。
   `cookies` 权限；
 - **前端**：ConnectWizard → Onboarding 弹窗（装插件+配对码+引导「去投递页逛一圈」
   → 轮询卡片出现即成功）；Settings 增「已连接站点」管理（stale 提醒重访）；
-  看板零改动（BoardView/board store/AppCard/AppFormModal/DetailDrawer 全保留）。
+  看板零改动（BoardView/board store/AppCard/AppFormModal/DetailDrawer 全保留；
+  注：2026-09-02 v0.6.1 起看板新增左侧「我的数据」侧边栏并删除「已投递」列，
+  本条指重构步骤自身不主动改看板逻辑）。
 
 **不达标降级路线**：默认访问同步 + 手动「同步当前页」按钮（这一档已解决全部已观测
 失败形态，含 Moka 类 wrapper 时机问题），后台自动同步转可选开关；邮件解析列 roadmap。

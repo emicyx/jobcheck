@@ -1,12 +1,12 @@
 # JobCheck · 秋招投递统一追踪平台
 
-把分散在各公司官网的秋招投递进度，收进一张状态看板。当前为 **M1+M2+M4（管线已通）**：账号体系 + 手动/自动投递记录 + 状态看板 + 时间线 + 标签 + 门户绑定自动追踪 + **自动配方管线**（采样 → 指纹/LLM 生成 → 回放验证 → 免审批发布）。总体设计见 [DESIGN.md](DESIGN.md) 与 [LLM_DESIGN.md](LLM_DESIGN.md)。
+把分散在各公司官网的秋招投递进度，收进一张状态看板。当前为 **M1+M2+M4（管线已通）**：账号体系 + 手动/自动投递记录 + 状态看板（左侧「我的数据」个人统计侧边栏）+ 时间线 + 标签 + 门户绑定自动追踪 + **自动配方管线**（采样 → 指纹/LLM 生成 → 回放验证 → 免审批发布）。总体设计见 [DESIGN.md](DESIGN.md) 与 [LLM_DESIGN.md](LLM_DESIGN.md)。
 
 ## 技术栈
 
 - **后端**：Python 3.12 / FastAPI / SQLAlchemy 2 / SQLite(WAL) / Argon2id / 签名 Cookie 会话 / lxml
 - **前端**：Vue 3 / Vite / TypeScript / Pinia / Naive UI（浅色定制主题）/ Chart.js（仅管理后台，懒加载）
-- **测试**：pytest（后端 66 例，含 golden 样本回归）
+- **测试**：pytest（后端 143 例，含 golden 样本回归）
 
 ## 目录结构
 
@@ -14,7 +14,7 @@
 backend/
   app/
     adapters/      # 适配器框架 + L1 JSON 适配器 + L2 配方执行器（共享 httpio/fields）
-    api/           # 路由：auth / applications / tags / account / meta / portals / bindings / samples / admin
+    api/           # 路由：auth / applications / tags / account / me / meta / portals / bindings / samples / admin / ext
     core/          # 配置、密码哈希、会话签名、Cookie AES-GCM 加密
     db/            # SQLAlchemy 模型与引擎（SQLite WAL + 外键）
     domain/        # 统一状态机 + 状态归一化（规则表+兜底）
@@ -23,14 +23,14 @@ backend/
     services/      # 投递逻辑 / 绑定生命周期 / 同步 diff
     scheduler.py   # APScheduler 轮询（门户级限速+指数退避）
   scripts/         # make_invite / seed_portals / mock_portal(本地演示门户)
-  tests/           # pytest（62 例）+ golden_samples/
+  tests/           # pytest（143 例）+ golden_samples/
 frontend/
   src/
     api/           # fetch 封装与接口
     stores/        # pinia：auth / board
     composables/   # useBindFlow（与插件协作的绑定交互流）
-    views/         # 登录 / 看板 / 设置
-    components/    # 分布条、卡片、表单弹窗、详情抽屉、接入向导
+    views/         # 登录 / 看板 / 设置 / 管理
+    components/    # 我的数据侧边栏、分布条、卡片、表单弹窗、详情抽屉、接入向导
 extension/         # Chrome/Edge MV3 插件：登录态捕获 + fetch/XHR 采样（≥0.4，开发者模式加载）
 DESIGN.md          # 产品与技术设计（决策记录见 §12）
 LLM_DESIGN.md      # LLM 子系统实现规格（M4 自动配方管线）
@@ -157,7 +157,7 @@ python -m pytest -q
 
 ## 统一状态机
 
-16 个细分状态（进行阶段 11 + 终态 4 + 待确认），定义在 `backend/app/domain/statuses.py`，前端经 `/api/meta` 取同一份；状态色全站统一——**彩色只用于编码状态**，其余界面保持墨色/灰阶。
+14 个细分状态（进行阶段 9 + 面试轮次未知兜底 1 + 终态 3 + 待确认 1；「已投递」已于 2026-09-02 并入「简历评估中」），定义在 `backend/app/domain/statuses.py`，前端经 `/api/meta` 取同一份；状态色全站统一——**彩色只用于编码状态**，其余界面保持墨色/灰阶。
 
 ## 里程碑进度
 
