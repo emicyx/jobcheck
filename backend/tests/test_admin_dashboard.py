@@ -30,7 +30,7 @@ def _seed(db):
             ),
             Application(
                 user_id=user.id, source="manual",
-                company="小米", job_title="AI 工程师", applied_at=now.date(), current_status="applied",
+                company="小米", job_title="AI 工程师", applied_at=now.date(), current_status="screening",
             ),
             Application(
                 user_id=user.id, source="manual",
@@ -95,10 +95,10 @@ def test_applications_stats_distribution(client, db):
     assert data["total"] == 3
     assert data["by_source"] == {"auto": 1, "manual": 2}
     statuses = {s["key"]: s["count"] for s in data["by_status"]}
-    assert statuses == {"applied": 1, "written_test": 1, "rejected": 1}
-    # 状态机顺序：applied(10) < written_test(40) < rejected(110)
+    assert statuses == {"screening": 1, "written_test": 1, "rejected": 1}
+    # 状态机顺序：screening(20) < written_test(40) < rejected(110)
     keys = [s["key"] for s in data["by_status"]]
-    assert keys.index("applied") < keys.index("written_test") < keys.index("rejected")
+    assert keys.index("screening") < keys.index("written_test") < keys.index("rejected")
     assert data["top_companies"][0] == {"company": "小米", "count": 2}
     assert data["top_portals"][0]["portal_name"] == "飞书演示"
 

@@ -89,7 +89,7 @@ _TEMPLATES: list[PlatformTemplate] = [
             ("applied_at", "biz_create_time"),
             ("work_location", "job_post_info.city_info.name"),
         ),
-        status_map=(("^0$", "applied"), ("^1$", "screening"), ("^3$", "written_test")),
+        status_map=(("^0$", "screening"), ("^1$", "screening"), ("^3$", "written_test")),
         csrf_refresh=("/api/v1/csrf/token", "atsx-csrf-token"),
     ),
     PlatformTemplate(

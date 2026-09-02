@@ -81,7 +81,8 @@ PLATFORM_SPECS: list[PlatformParseSpec] = [
             ("work_location", "job_post_info.city_info.name"),
         ),
         # operation_code 码表（与页面时间线逐条对齐验证）；其余码（2/4/5…）不映射
-        status_map=(("^0$", "applied"), ("^1$", "screening"), ("^3$", "written_test")),
+        # ^0$（已投递）映射 screening：applied 状态已于 2026-09-02 并入
+        status_map=(("^0$", "screening"), ("^1$", "screening"), ("^3$", "written_test")),
     ),
     PlatformParseSpec(
         # 北森招聘：2026-09-01 hkaco.zhiye.com 实测。分组列表：* 段展开（多 tab 拼接）。

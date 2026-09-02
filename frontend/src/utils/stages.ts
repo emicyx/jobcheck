@@ -19,7 +19,7 @@ export interface StageDef {
 
 export const STAGE_DEFS: StageDef[] = [
   { id: 'pending_confirm', label: '待确认', keys: ['pending_confirm'] },
-  { id: 'applied', label: '已投递', keys: ['applied'] },
+  // 「已投递」（applied）列已移除：2026-09-02 并入 screening（归一化几乎总映射到更后阶段，该列长期空）
   { id: 'screening', label: '简历评估', keys: ['screening'] },
   { id: 'testing', label: '测评/笔试', color: '#3e9e8c', keys: ['assessment', 'written_test'] },
   {

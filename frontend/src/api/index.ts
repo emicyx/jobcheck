@@ -40,6 +40,20 @@ export const accountApi = {
   remove: (password: string) => http.delete<{ ok: boolean }>('/account', { password }),
 }
 
+// ── 个人数据（看板左侧「我的数据」侧边栏） ──
+
+export interface MyStats {
+  total: number
+  in_progress: number
+  terminal: number
+  month_new: number
+  by_status: { key: string; label: string; color: string; count: number }[]
+}
+
+export const statsApi = {
+  mine: () => http.get<MyStats>('/me/stats'),
+}
+
 export const portalsApi = {
   list: () => http.get<Portal[]>('/portals'),
   identify: (url: string) => http.post<Portal | null>('/portals/identify', { url }),

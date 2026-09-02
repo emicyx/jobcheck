@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api import account, admin, applications, auth, bindings, ext, meta, portals, samples, tags
+from app.api import account, admin, applications, auth, bindings, ext, me, meta, portals, samples, tags
 from app.core.config import settings
 from app.core.security import hash_password
 from app.db.database import Base, SessionLocal, engine
@@ -43,6 +43,11 @@ def _ensure_columns() -> None:
             col = ddl.split("ADD COLUMN ")[1].split()[0]
             if col not in snap_cols:
                 conn.execute(text(ddl))
+        # v0.6.1：「已投递」（applied）并入 screening——残留记录会因状态不在状态机而
+        # 不可见/不可编辑，幂等修复；状态历史表是日志，保留原文 key 不改写
+        conn.execute(
+            text("UPDATE applications SET current_status = 'screening' WHERE current_status = 'applied'")
+        )
         conn.commit()
 
 
@@ -87,6 +92,7 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(applications.router, prefix="/api")
 app.include_router(tags.router, prefix="/api")
 app.include_router(account.router, prefix="/api")
+app.include_router(me.router, prefix="/api")
 app.include_router(meta.router, prefix="/api")
 app.include_router(portals.router, prefix="/api")
 app.include_router(bindings.router, prefix="/api")

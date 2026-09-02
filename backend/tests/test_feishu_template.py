@@ -155,7 +155,7 @@ def test_feishu_pipeline_publishes_and_runtime_extracts(auth_client, db, monkeyp
     assert portal.config["fields"]["applied_at"] == "biz_create_time"
     assert "not login" in portal.config["session_invalid_markers"]
     smap = {(e["pattern"], e["status"]) for e in portal.config["status_map"]}
-    assert ("^0$", "applied") in smap and ("^3$", "written_test") in smap
+    assert ("^0$", "screening") in smap and ("^3$", "written_test") in smap
 
     recipe = db.scalar(select(Recipe).where(Recipe.portal_id == portal.id))
     assert recipe.source == "fingerprint"

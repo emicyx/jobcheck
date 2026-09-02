@@ -19,7 +19,8 @@ def test_meta(auth_client):
     assert resp.status_code == 200
     body = resp.json()
     keys = {s["key"] for s in body["statuses"]}
-    assert {"applied", "screening", "interview_1", "offer", "rejected", "pending_confirm"} <= keys
+    assert {"screening", "interview_1", "offer", "rejected", "pending_confirm"} <= keys
+    assert "applied" not in keys  # 2026-09-02 已并入 screening
     assert body["batches"] == ["提前批", "正式批", "春招", "实习"]
 
 

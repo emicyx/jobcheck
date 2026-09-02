@@ -73,7 +73,7 @@ class Application(Base):
     work_location: Mapped[str | None] = mapped_column(String(128), nullable=True)
     applied_at: Mapped[datetime] = mapped_column(Date)
     batch: Mapped[str] = mapped_column(String(16), default="正式批")
-    current_status: Mapped[str] = mapped_column(String(32), default="applied", index=True)
+    current_status: Mapped[str] = mapped_column(String(32), default="screening", index=True)
     raw_status_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     confidence: Mapped[str | None] = mapped_column(String(16), nullable=True)  # manual | recipe | llm

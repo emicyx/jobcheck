@@ -23,7 +23,8 @@ _GENERIC_RULES: list[tuple[str, str]] = [
     (r"笔试", "written_test"),
     (r"测评|人才评估|在线测评", "assessment"),
     (r"评估|筛选|初筛|复筛|简历", "screening"),
-    (r"已投递|投递成功", "applied"),
+    # 「已投递/投递成功」原映射独立 applied 状态，2026-09-02 并入 screening
+    (r"已投递|投递成功", "screening"),
     (r"已入职", "onboarded"),
 ]
 

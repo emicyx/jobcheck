@@ -18,7 +18,9 @@ class StatusDef:
 
 _STATUSES: list[StatusDef] = [
     # ── 进行阶段（有序）──
-    StatusDef("applied", "已投递", "progress", 10, "#8ca0b3"),
+    # 「已投递」原为独立 applied 状态（order 10），已并入 screening（2026-09-02 合并）：
+    # 归一化规则几乎总把同步数据映射到「简历评估」等更后阶段，applied 列长期无数据；
+    # 门户原文语义仍由 raw_status_text 保留
     StatusDef("screening", "简历评估中", "progress", 20, "#6188d8"),
     StatusDef("assessment", "测评中", "progress", 30, "#4aa8c0"),
     StatusDef("written_test", "笔试中", "progress", 40, "#3e9e8c"),
@@ -44,7 +46,7 @@ _STATUSES: list[StatusDef] = [
 BY_KEY: dict[str, StatusDef] = {s.key: s for s in _STATUSES}
 
 VALID_KEYS = set(BY_KEY.keys())
-DEFAULT_STATUS = "applied"
+DEFAULT_STATUS = "screening"
 
 BATCHES = ["提前批", "正式批", "春招", "实习"]
 DEFAULT_BATCH = "正式批"

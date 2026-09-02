@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
-import { appsApi, bindingsApi, extApi, metaApi, tagsApi } from '../api'
+import { appsApi, bindingsApi, extApi, metaApi, statsApi, tagsApi } from '../api'
 import type { Application, Binding, Meta, Tag } from '../types'
-import type { ConnectedSite } from '../api'
+import type { ConnectedSite, MyStats } from '../api'
 
 export interface BoardFilters {
   q: string
@@ -18,6 +18,7 @@ export const useBoardStore = defineStore('board', {
     tags: [] as Tag[],
     bindings: [] as Binding[],
     connectedSites: [] as ConnectedSite[],
+    stats: null as MyStats | null,
     filters: {
       q: '',
       batch: null,
@@ -54,6 +55,9 @@ export const useBoardStore = defineStore('board', {
     async loadSites() {
       const { sites } = await extApi.connectedSites()
       this.connectedSites = sites
+    },
+    async loadStats() {
+      this.stats = await statsApi.mine()
     },
     async loadApplications() {
       this.loading = true

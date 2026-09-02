@@ -45,7 +45,7 @@ watch(
     form.work_location = it?.work_location ?? ''
     form.applied_at = it?.applied_at ?? new Date().toISOString().slice(0, 10)
     form.batch = it?.batch ?? store.meta?.default_batch ?? '正式批'
-    form.current_status = it?.current_status ?? store.meta?.default_status ?? 'applied'
+    form.current_status = it?.current_status ?? store.meta?.default_status ?? 'screening'
     form.raw_status_text = it?.raw_status_text ?? ''
     form.note = it?.note ?? ''
     form.tag_ids = it?.tags.map((t) => t.id) ?? []
