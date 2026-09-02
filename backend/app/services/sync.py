@@ -8,8 +8,9 @@ from sqlalchemy.orm import Session
 
 from app.adapters import AdapterContext, AdapterError, BaseAdapter, RawApplication, SessionInvalidError, get_adapter
 from app.db.models import AppStatusHistory, Application, Binding, Portal, User
-from app.domain import normalize, statuses
-from .bindings import cookies_to_context, utcnow
+from app.domain import statuses
+from app.llm import classify
+from .bindings import cookies_to_context, persist_refreshed_cookies, utcnow
 
 
 def sync_binding(db: Session, binding: Binding, adapter: BaseAdapter | None = None) -> dict:
@@ -21,6 +22,8 @@ def sync_binding(db: Session, binding: Binding, adapter: BaseAdapter | None = No
     adapter = adapter or get_adapter(portal.provider_key)
     ctx = cookies_to_context(binding.cookie_blob)
     raw_list = adapter.fetch(portal.config or {}, ctx)
+    # 运行期自愈刷新出的 Cookie（如飞书 CSRF 轮换）写回存储，下轮不再依赖旧值
+    persist_refreshed_cookies(db, binding, ctx.refreshed_cookies)
 
     summary = sync_applications(db, binding, raw_list, portal)
 
@@ -39,17 +42,34 @@ def sync_binding(db: Session, binding: Binding, adapter: BaseAdapter | None = No
 def sync_applications(
     db: Session, binding: Binding, raw_list: list[RawApplication], portal: Portal
 ) -> dict:
-    user: User = binding.user
+    return ingest_applications(
+        db, user=binding.user, portal=portal, raw_list=raw_list, binding_id=binding.id
+    )
+
+
+def ingest_applications(
+    db: Session,
+    *,
+    user: User,
+    portal: Portal,
+    raw_list: list[RawApplication],
+    binding_id: int | None = None,
+) -> dict:
+    """归一化 → 与本地 diff → 落卡与历史。绑定轮询与快照 ingest 共用的唯一实现；
+    binding_id 为空时（快照路径）按 (用户, 门户) 圈定既有卡片。"""
     created = updated = unchanged = 0
 
-    existing = list(
-        db.scalars(
-            select(Application).where(
-                Application.user_id == user.id,
-                Application.binding_id == binding.id,
-            )
+    if binding_id is not None:
+        match_filter = (
+            Application.user_id == user.id,
+            Application.binding_id == binding_id,
         )
-    )
+    else:
+        match_filter = (
+            Application.user_id == user.id,
+            Application.portal_id == portal.id,
+        )
+    existing = list(db.scalars(select(Application).where(*match_filter)))
     by_key: dict[str, Application] = {}
     for app_row in existing:
         key = (app_row.extra or {}).get("portal_key")
@@ -57,7 +77,7 @@ def sync_applications(
             by_key[str(key)] = app_row
 
     for raw in raw_list:
-        norm = normalize.normalize_status(raw.status_raw, (portal.config or {}).get("status_map"))
+        norm = classify.resolve_status(db, portal, raw.status_raw)
         app_row = by_key.get(raw.portal_key) if raw.portal_key else None
         if app_row is None:
             # 无门户唯一键时按（岗位+部门）匹配，避免重复建卡
@@ -66,7 +86,7 @@ def sync_applications(
         if app_row is None:
             app_row = Application(
                 user_id=user.id,
-                binding_id=binding.id,
+                binding_id=binding_id,
                 portal_id=portal.id,
                 source="auto",
                 confidence="recipe",
@@ -110,11 +130,18 @@ def sync_applications(
             if raw.work_location and not app_row.work_location:
                 app_row.work_location = raw.work_location
                 changed = True
+            # 门户键后补：首录时无 id 映射、靠 title 匹配上的卡，拿到稳定键后固化，
+            # 之后不再依赖岗位名不变去重（title 变了会建重复卡）
+            if raw.portal_key and not (app_row.extra or {}).get("portal_key"):
+                extra = dict(app_row.extra or {})
+                extra["portal_key"] = raw.portal_key
+                app_row.extra = extra
+                changed = True
             if raw.applied_at and app_row.applied_at != raw.applied_at:
                 app_row.applied_at = raw.applied_at
                 changed = True
             if not app_row.binding_id:
-                app_row.binding_id = binding.id
+                app_row.binding_id = binding_id
                 app_row.portal_id = portal.id
                 changed = True
             if changed:

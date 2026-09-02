@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>JobCheck E2E 驱动页</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 24px; background: #fafafa; }
+  button { padding: 10px 18px; margin: 4px; font-size: 15px; cursor: pointer; }
+  #out { width: 100%; height: 420px; margin-top: 12px; font-family: Consolas, monospace;
+         font-size: 12px; white-space: pre; }
+  .row { margin: 8px 0; }
+  input { padding: 8px; width: 420px; }
+</style>
+</head>
+<body>
+<h2>JobCheck 全链路驱动页（真实数据）</h2>
+<p class="row">目标页 URL：<input id="target-url" value="https://xiaomi.jobs.f.mioffice.cn/campus/position/application"></p>
+<p class="row">门户 ID（绑定用，发布后填）：<input id="portal-id" placeholder="如 8" style="width:100px"></p>
+<p class="row">
+  <button id="btn-login">① 平台登录(admin)</button>
+  <button id="btn-arm-sample">② 武装采样(arm)</button>
+  <button id="btn-poll-sample">③ 轮询采样结果</button>
+  <button id="btn-identify">④ identify</button>
+  <button id="btn-arm-bind">⑤ 武装绑定(bind)</button>
+  <button id="btn-poll-bind">⑥ 轮询绑定</button>
+</p>
+<textarea id="out" readonly></textarea>
+<script>
+const out = document.getElementById('out');
+const log = (m) => { out.value = new Date().toLocaleTimeString() + '  ' + m + '\n' + out.value; };
+const api = (path, opts = {}) => fetch('/api' + path, {
+  ...opts, credentials: 'include',
+  headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+}).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
+
+// ── 插件桥（与 useBindFlow/ConnectWizard 同一契约）──
+const extReady = { v: false };
+window.addEventListener('message', (ev) => {
+  const msg = ev.data;
+  if (!msg || msg.source !== 'jobcheck-ext') return;
+  if (msg.type === 'jc.pong') { extReady.v = true; log('[ext] pong 插件在线'); }
+  if (msg.type === 'jc.sampleArmed') log('[ext] sampleArmed 采样凭证已交接给插件');
+  if (msg.type === 'jc.bindArmed') log('[ext] bindArmed 绑定任务已交接给插件');
+  if (msg.type === 'jc.bindResult') log('[ext] bindResult ok=' + msg.ok + ' info=' + JSON.stringify(msg.info));
+  if (msg.type === 'jc.contextInvalidated') log('[ext] 内容脚本已失效：请刷新本页');
+});
+const ping = () => window.postMessage({ source: 'jobcheck-page', type: 'jc.ping' }, '*');
+ping(); setInterval(ping, 3000);
+
+let sampleId = null, bindToken = null;
+
+document.getElementById('btn-login').onclick = async () => {
+  let me = await api('/auth/me');
+  if (me.status !== 200) {
+    const r = await api('/auth/login', { method: 'POST', body: JSON.stringify({
+      email: 'admin@jobcheck.dev', password: 'Admin12345' }) });
+    log('login → ' + r.status + ' ' + JSON.stringify(r.body).slice(0, 120));
+  } else {
+    log('already logged in: ' + JSON.stringify(me.body).slice(0, 120));
+  }
+};
+
+document.getElementById('btn-arm-sample').onclick = async () => {
+  const r = await api('/samples/intents', { method: 'POST' });
+  log('POST /samples/intents → ' + r.status + ' ' + JSON.stringify(r.body));
+  if (r.status !== 201) return;
+  sampleId = r.body.id;
+  window.postMessage({ source: 'jobcheck-page', type: 'jc.startSample',
+    payload: { token: r.body.token, platformOrigin: window.location.origin } }, '*');
+  log('[page] jc.startSample 已发送（token 已带）→ 请到目标页点插件图标采集');
+};
+
+document.getElementById('btn-poll-sample').onclick = async () => {
+  const r = await api('/samples/mine');
+  const rows = (r.body || []).slice(0, 3).map((s) =>
+    `#${s.id} ${s.status}/${s.pipeline_status} portal=${s.portal_id} note=${(s.pipeline_note || '').slice(0, 140)}`);
+  log('samples/mine →\n    ' + rows.join('\n    '));
+};
+
+document.getElementById('btn-identify').onclick = async () => {
+  const url = document.getElementById('target-url').value.trim();
+  const r = await api('/portals/identify', { method: 'POST', body: JSON.stringify({ url }) });
+  log('identify(' + url + ') → ' + r.status + ' ' + JSON.stringify(r.body));
+  if (r.body && r.body.id) document.getElementById('portal-id').value = r.body.id;
+};
+
+document.getElementById('btn-arm-bind').onclick = async () => {
+  const portalId = parseInt(document.getElementById('portal-id').value, 10);
+  if (!portalId) { log('先填门户 id（可点 ④ 自动识别）'); return; }
+  const r = await api('/bindings', { method: 'POST', body: JSON.stringify({ portal_id: portalId }) });
+  log('POST /bindings → ' + r.status + ' ' + JSON.stringify(r.body));
+  if (r.status !== 201) return;
+  bindToken = r.body.token;
+  window.postMessage({ source: 'jobcheck-page', type: 'jc.startBind',
+    payload: {
+      token: r.body.token, loginUrl: r.body.login_url,
+      sessionCookieNames: r.body.session_cookie_names || [],
+      platformOrigin: window.location.origin,
+    } }, '*');
+  log('[page] jc.startBind 已发送 → 插件将打开登录页并用现有 Cookie 激活');
+};
+
+document.getElementById('btn-poll-bind').onclick = async () => {
+  if (!bindToken) { log('还没有 bindToken'); return; }
+  const r = await api('/bindings/intents/' + bindToken);
+  log('intent → ' + JSON.stringify(r.body));
+};
+
+log('驱动页就绪。平台同源（/api 经 vite 代理），插件内容脚本应注入本页。');
+</script>
+</body>
+</html>

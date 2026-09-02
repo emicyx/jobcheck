@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import type { SelectOption } from 'naive-ui'
 import { useBoardStore } from '../stores/board'
 import AppHeader from '../components/AppHeader.vue'
 import StatusBar from '../components/StatusBar.vue'
-import AppCard from '../components/AppCard.vue'
+import BoardColumn from '../components/BoardColumn.vue'
 import DetailDrawer from '../components/DetailDrawer.vue'
 import AppFormModal from '../components/AppFormModal.vue'
 import ConnectWizard from '../components/ConnectWizard.vue'
-import type { Application } from '../types'
+import { buildStageColumns, isTerminalStatus } from '../utils/stages'
 
 const store = useBoardStore()
 
@@ -16,6 +16,7 @@ const creating = ref(false)
 const wizardShow = ref(false)
 const drawerShow = ref(false)
 const drawerAppId = ref<number | null>(null)
+const boardScrollRef = ref<HTMLElement | null>(null)
 
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 watch(
@@ -35,13 +36,32 @@ onMounted(async () => {
   await Promise.all([store.loadApplications(), store.loadBindings().catch(() => {})])
 })
 
-const columns = computed(() =>
-  [...(store.meta?.statuses ?? [])]
-    .sort((a, b) => a.order - b.order)
-    .map((s) => ({
-      ...s,
-      apps: store.applications.filter((a) => a.current_status === s.key),
-    })),
+// ── 阶段列：细分状态合并展示，终态列可折叠 ──
+const stageColumns = computed(() => buildStageColumns(store.meta, store.applications))
+const processColumns = computed(() => stageColumns.value.filter((c) => !c.terminal))
+const endedColumn = computed(() => stageColumns.value.find((c) => c.terminal) ?? null)
+
+const ENDED_COLLAPSED_KEY = 'jobcheck.board.ended-collapsed'
+const endedCollapsed = ref(
+  (() => {
+    const saved = localStorage.getItem(ENDED_COLLAPSED_KEY)
+    if (saved !== null) return saved === '1'
+    return window.innerWidth < 1600
+  })(),
+)
+watch(endedCollapsed, (v) => localStorage.setItem(ENDED_COLLAPSED_KEY, v ? '1' : '0'))
+
+// 状态筛选指向终态列时自动展开，并把目标列滚到可见范围
+watch(
+  () => store.filters.status,
+  async (key) => {
+    if (!key) return
+    if (isTerminalStatus(key)) endedCollapsed.value = false
+    await nextTick()
+    boardScrollRef.value
+      ?.querySelector<HTMLElement>(`[data-statuses~="${key}"]`)
+      ?.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' })
+  },
 )
 
 const tagFilterOptions = computed<SelectOption[]>(() =>
@@ -60,6 +80,7 @@ function openDetail(id: number) {
 function refresh() {
   store.loadApplications()
   store.loadBindings().catch(() => {})
+  store.loadSites().catch(() => {})
 }
 
 function hasActiveFilters(): boolean {
@@ -94,6 +115,20 @@ function clearFilters() {
         {{ b.portal.name }}<span v-if="i < store.expiredBindings.length - 1">、</span>
       </span>
       —— 请到「设置 → 自动追踪」重新登录。
+    </n-alert>
+
+    <!-- 站点登录态疑似失效提醒（扩展快照链路：login_suspect）-->
+    <n-alert
+      v-if="store.staleSites.length"
+      type="warning"
+      class="expired-banner"
+      :show-icon="true"
+    >
+      {{ store.staleSites.length }} 个站点的登录态疑似失效，自动同步拿不到最新状态：
+      <span v-for="(s, i) in store.staleSites" :key="s.portal_id">
+        {{ s.name }}<span v-if="i < store.staleSites.length - 1">、</span>
+      </span>
+      —— 请到「设置 → 已连接站点」打开对应投递页重新登录，下次同步自动恢复。
     </n-alert>
 
     <div class="toolbar">
@@ -146,24 +181,35 @@ function clearFilters() {
       </n-empty>
     </div>
 
-    <div v-else class="board-scroll">
+    <div v-else ref="boardScrollRef" class="board-scroll">
       <div class="board-columns">
-        <section
-          v-for="col in columns"
-          :key="col.key"
-          class="board-col"
-          :class="{ 'is-terminal': col.group === 'terminal' }"
-          :aria-label="col.label"
+        <BoardColumn
+          v-for="col in processColumns"
+          :key="col.id"
+          :col="col"
+          @open="openDetail"
+        />
+
+        <!-- 终态列：默认收起成右侧细条，聚焦进行中的投递；点击展开 -->
+        <BoardColumn
+          v-if="endedColumn && !endedCollapsed"
+          :key="endedColumn.id"
+          :col="endedColumn"
+          collapsible
+          @open="openDetail"
+          @collapse="endedCollapsed = true"
+        />
+        <button
+          v-else-if="endedColumn"
+          class="board-rail"
+          :title="`展开「${endedColumn.label}」列（${endedColumn.total} 条）`"
+          :aria-label="`展开${endedColumn.label}列`"
+          @click="endedCollapsed = false"
         >
-          <div class="board-col-head">
-            <span class="col-dot" :style="{ background: col.color }"></span>
-            <span class="board-col-title">{{ col.label }}</span>
-            <span class="board-col-count">{{ col.apps.length }}</span>
-          </div>
-          <div class="board-col-body">
-            <AppCard v-for="app in col.apps" :key="app.id" :app="app" @open="openDetail" />
-          </div>
-        </section>
+          <span class="rail-count">{{ endedColumn.total }}</span>
+          <span class="rail-label">{{ endedColumn.label }}</span>
+          <span class="rail-arrow" aria-hidden="true">«</span>
+        </button>
       </div>
     </div>
 
@@ -184,5 +230,4 @@ function clearFilters() {
   flex-wrap: wrap;
 }
 .empty-wrap { flex: 1; display: flex; align-items: center; justify-content: center; }
-.col-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 </style>

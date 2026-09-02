@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useMessage } from 'naive-ui'
 import { useRouter } from 'vue-router'
-import { accountApi, bindingsApi, tagsApi } from '../api'
+import { accountApi, bindingsApi, extApi, tagsApi } from '../api'
+import type { ConnectedSite } from '../api'
 import { useBoardStore } from '../stores/board'
 import { useAuthStore } from '../stores/auth'
 import { useBindFlow } from '../composables/useBindFlow'
-import { fmtDateTime } from '../utils/format'
+import { fmtDateTime, parseServerDate } from '../utils/format'
 import type { Binding } from '../types'
 import AppHeader from '../components/AppHeader.vue'
 
@@ -15,7 +16,57 @@ const router = useRouter()
 const board = useBoardStore()
 const auth = useAuthStore()
 
-// ── 自动追踪绑定 ──
+// ── 扩展同步（新链路：手动快照建档 + 每小时后台自动同步）──
+const pairCode = ref<string | null>(null)
+const pairExpiresAt = ref<string | null>(null)
+const pairing = ref(false)
+const nowTs = ref(Date.now())
+const sites = ref<ConnectedSite[]>([])
+
+let tickTimer: ReturnType<typeof setInterval> | null = null
+function ensureTick() {
+  if (tickTimer) return
+  tickTimer = setInterval(() => {
+    nowTs.value = Date.now()
+    if (pairExpiresAt.value && parseServerDate(pairExpiresAt.value).getTime() < nowTs.value) {
+      pairCode.value = null
+      pairExpiresAt.value = null
+    }
+  }, 1000)
+}
+onBeforeUnmount(() => { if (tickTimer) clearInterval(tickTimer) })
+
+const pairCountdown = computed(() => {
+  if (!pairExpiresAt.value) return ''
+  const sec = Math.max(0, Math.floor((parseServerDate(pairExpiresAt.value).getTime() - nowTs.value) / 1000))
+  return `${Math.floor(sec / 60)} 分 ${String(sec % 60).padStart(2, '0')} 秒`
+})
+
+async function genPairCode() {
+  pairing.value = true
+  try {
+    const res = await extApi.createPairCode()
+    pairCode.value = res.code
+    pairExpiresAt.value = res.expires_at
+    nowTs.value = Date.now()
+    ensureTick()
+  } catch (e: any) {
+    message.error(e?.message || '生成配对码失败')
+  } finally {
+    pairing.value = false
+  }
+}
+
+async function loadSites() {
+  try {
+    sites.value = (await extApi.connectedSites()).sites
+  } catch {
+    /* 静默 */
+  }
+}
+loadSites()
+
+// ── 自动追踪绑定（旧链路，已停用）──
 const bindings = ref<Binding[]>([])
 const refreshingId = ref<number | null>(null)
 const { phase: reloginPhase, start: startRelogin } = useBindFlow()
@@ -157,8 +208,51 @@ async function deleteAccount() {
 
     <div class="settings-body">
       <section class="panel">
-        <h2>自动追踪</h2>
-        <p class="hint">已接入的招聘门户。平台默认每 6 小时自动同步一次投递状态；登录态失效后需要重新登录。</p>
+        <h2>扩展同步 <n-tag size="small" round type="success" :bordered="false">推荐</n-tag></h2>
+        <p class="hint">
+          安装浏览器扩展并配对一次，之后到任意公司招聘站的「我的投递」页点插件「同步当前页」，投递记录即同步进看板并建立该站连接；
+          已连接站点插件每小时静默刷新一次。Cookie 始终留在浏览器里。
+        </p>
+
+        <div class="pair-area">
+          <div v-if="pairCode" class="pair-code-show">
+            <div class="pair-code">{{ pairCode }}</div>
+            <p class="hint" style="margin: 6px 0 0">{{ pairCountdown }} 内有效 · 在插件弹窗中输入即可完成配对</p>
+          </div>
+          <n-button v-else size="small" type="primary" :loading="pairing" @click="genPairCode">生成配对码</n-button>
+        </div>
+
+        <ol class="pair-steps">
+          <li>安装/更新插件：未安装时在插件页「加载已解压」<code>extension/</code> 目录（或从「接入追踪」下载，版本需 ≥ 0.5.1），装完刷新招聘站页面</li>
+          <li>点浏览器工具栏的 JobCheck 图标，在面板里输入上方配对码</li>
+          <li>打开目标公司招聘站的「我的投递 / 应聘进度」页，等几秒——卡片自动出现即接入成功</li>
+        </ol>
+
+        <template v-if="sites.length">
+          <h3 class="sites-title">已连接站点</h3>
+          <div class="binding-list">
+            <div v-for="s in sites" :key="s.portal_id" class="binding-row">
+              <div class="binding-main">
+                <b>{{ s.name }}</b>
+                <n-tag size="small" round :type="s.login_suspect ? 'warning' : 'success'" :bordered="false">
+                  {{ s.login_suspect ? '疑似未登录' : '正常' }}
+                </n-tag>
+                <span class="binding-meta">
+                  {{ s.domain }}<template v-if="s.last_at"> · 最近同步 {{ fmtDateTime(s.last_at) }}</template>
+                </span>
+              </div>
+              <div class="binding-actions">
+                <n-button size="small" tag="a" :href="s.url" target="_blank">打开投递页</n-button>
+              </div>
+            </div>
+          </div>
+          <p class="hint" style="margin-bottom: 0">「疑似未登录」的站点：打开它的投递页重新登录一次即可恢复自动同步。</p>
+        </template>
+      </section>
+
+      <section class="panel">
+        <h2>自动追踪（旧版服务端轮询）<n-tag size="small" round type="default" :bordered="false">已停用</n-tag></h2>
+        <p class="hint">旧链路（上传登录 Cookie 由平台轮询）已停用，不再自动同步；历史绑定数据保留备查。新接入请用上方「扩展同步」。</p>
 
         <div v-if="bindings.length" class="binding-list">
           <div v-for="b in bindings" :key="b.id" class="binding-row">
@@ -299,6 +393,15 @@ async function deleteAccount() {
 .swatch:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 .kv { display: flex; gap: 14px; padding: 5px 0; font-size: 14px; }
 .kv span { color: var(--ink-3); width: 48px; flex: none; }
+.pair-area { margin: 4px 0 12px; }
+.pair-code-show { text-align: center; padding: 10px 0 4px; }
+.pair-code {
+  font-size: 34px; font-weight: 700; letter-spacing: .3em; text-indent: .3em;
+  font-variant-numeric: tabular-nums; color: var(--ink);
+}
+.pair-steps { color: var(--ink-3); font-size: 13px; margin: 0 0 4px; padding-left: 20px; display: grid; gap: 6px; }
+.pair-steps code { background: var(--line); border-radius: 4px; padding: 0 4px; font-size: 12px; }
+.sites-title { margin: 18px 0 0; font-size: 14px; }
 .danger-zone {
   margin-top: 22px; padding: 16px;
   border: 1px solid #f0d5d5; background: #fdf7f7; border-radius: 10px;

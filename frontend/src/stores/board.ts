@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
-import { appsApi, bindingsApi, metaApi, tagsApi } from '../api'
+import { appsApi, bindingsApi, extApi, metaApi, tagsApi } from '../api'
 import type { Application, Binding, Meta, Tag } from '../types'
+import type { ConnectedSite } from '../api'
 
 export interface BoardFilters {
   q: string
@@ -16,6 +17,7 @@ export const useBoardStore = defineStore('board', {
     applications: [] as Application[],
     tags: [] as Tag[],
     bindings: [] as Binding[],
+    connectedSites: [] as ConnectedSite[],
     filters: {
       q: '',
       batch: null,
@@ -28,6 +30,10 @@ export const useBoardStore = defineStore('board', {
   getters: {
     expiredBindings(state): Binding[] {
       return state.bindings.filter((b) => b.status === 'expired' || b.status === 'paused')
+    },
+    /** 扩展快照链路里疑似未登录的站点（最新一次快照上报 login_suspect） */
+    staleSites(state): ConnectedSite[] {
+      return state.connectedSites.filter((s) => s.login_suspect)
     },
     statusMap(state): Record<string, Meta['statuses'][number]> {
       const map: Record<string, Meta['statuses'][number]> = {}
@@ -44,6 +50,10 @@ export const useBoardStore = defineStore('board', {
     },
     async loadBindings() {
       this.bindings = await bindingsApi.list()
+    },
+    async loadSites() {
+      const { sites } = await extApi.connectedSites()
+      this.connectedSites = sites
     },
     async loadApplications() {
       this.loading = true

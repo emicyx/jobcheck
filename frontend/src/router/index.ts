@@ -7,6 +7,7 @@ const router = createRouter({
     { path: '/login', name: 'login', component: () => import('../views/LoginView.vue') },
     { path: '/', name: 'board', component: () => import('../views/BoardView.vue') },
     { path: '/settings', name: 'settings', component: () => import('../views/SettingsView.vue') },
+    { path: '/admin', name: 'admin', component: () => import('../views/AdminView.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })
@@ -16,6 +17,7 @@ router.beforeEach(async (to) => {
   if (!auth.ready) await auth.init()
   if (to.name !== 'login' && !auth.user) return { name: 'login' }
   if (to.name === 'login' && auth.user) return { name: 'board' }
+  if (to.name === 'admin' && auth.user?.role !== 'admin') return { name: 'board' }
   return true
 })
 

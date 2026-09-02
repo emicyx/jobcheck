@@ -1,0 +1,37 @@
+{
+ "source": "星环科技 app.mokahr.com（Moka）2026-09-02 真实快照 #1 形状：接口响应体加密（{data: 密文, necromancer: 密钥材料}），明文只存在于页面 JS 解密之后。前 3 条为真实捕获原文（快照 #1）；#decrypted 伪条目是扩展 net-capture JSON.parse 钩子的产物——页面解密后的明文按 Moka 公开 API 通行形态（data.list + positionName/statusText/deliverTime/applyId）合成，真实字段形状待星环重采校准（heuristics 兜底可覆盖其他形状）",
+ "snapshot": {
+  "url": "https://app.mokahr.com/campus_apply/transwarp/3196#/candidateHome/applications",
+  "network": [
+   {
+    "url": "https://app.mokahr.com/api/outer/ats-apply/personal-center/applications",
+    "method": "POST",
+    "params": {},
+    "request_body": "{}",
+    "response_body": "{\"data\": \"D2sYoWg+0XO3pRBaXkxknsCYSEIeMgA8Pj/0iqmt9nv64EnxDRSAMUMHZpUWbFBGdsyU/uycngisKcu1+4AFxNl+jogReEZ8RdxrhHSYJ0kmpNgvNjMSazYBXI4owpDRwERO0EHTSRZj+aLe0m4rdtI7RWX7BXChk2LIL0EI1X2aNESXlv8fYTxAsrppHYsH\", \"necromancer\": \"f312fccefe32f58e\"}"
+   },
+   {
+    "url": "https://app.mokahr.com/api/outer/ats-apply/personal-center/candidateInfo",
+    "method": "POST",
+    "params": {},
+    "request_body": "{}",
+    "response_body": "{\"data\": \"BOSeiYv1Fy1/z0qcqlKhwXF/loEmn+YNWlZYFvuc0IGEZNpu9FiHD8lZ4HosrzA3XrYK6LYxEFgiV0TDrjcCEP1VKmMIuo6gUmyoNWgHtyxhkSQVaVDa6PnKq0tqOy58v9slqTdLuS5+Qu6fulWB/Cw==\", \"necromancer\": \"d9793bb903fecdd8\"}"
+   },
+   {
+    "url": "https://app.mokahr.com/campus_apply/transwarp/3196#embedded-js-languageManifest",
+    "method": "GET",
+    "params": {},
+    "request_body": "",
+    "response_body": "{\"new_i18n_en_us_messages\": \"/moka-fe-public/mage-i18n/javascripts/new_i18n_en_us_messages.a90ac2ef47cfdf4fdc8345a3d9bc6c5d.js\", \"new_i18n_zh_cn_messages\": \"/moka-fe-public/mage-i18n/javascripts/new_i18n_zh_cn_messages.bb0d04547c83be8f463f301f61a55a93.js\"}"
+   },
+   {
+    "url": "https://app.mokahr.com/campus_apply/transwarp/3196#/candidateHome/applications#decrypted",
+    "method": "GET",
+    "params": {},
+    "request_body": "",
+    "response_body": "{\"code\": 200, \"data\": {\"list\": [{\"applyId\": 9001, \"positionName\": \"大数据平台开发工程师\", \"statusText\": \"简历评估中\", \"deliverTime\": \"2026-08-20 10:24:00\"}, {\"applyId\": 9002, \"positionName\": \"后端开发工程师（基础平台）\", \"statusText\": \"已结束\", \"deliverTime\": \"2026-08-18 09:00:00\"}], \"total\": 2}}"
+   }
+  ],
+  "resources": []
+ }
+}

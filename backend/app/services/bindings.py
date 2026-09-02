@@ -29,6 +29,26 @@ def cookies_to_context(cookie_blob: bytes) -> AdapterContext:
     return AdapterContext(cookies={c["name"]: c["value"] for c in items})
 
 
+def persist_refreshed_cookies(db: Session, binding: Binding, refreshed: dict[str, str]) -> None:
+    """运行期自愈刷新出的 Cookie 新值合并回加密存储（如飞书 CSRF 轮换）。
+
+    只更新同名值、不增删条目；无变化不写库。
+    """
+    if not refreshed or binding.cookie_blob is None:
+        return
+    items = json.loads(crypto.decrypt_text(binding.cookie_blob))
+    changed = False
+    for entry in items:
+        new_value = refreshed.get(entry.get("name"))
+        if new_value and new_value != entry.get("value"):
+            entry["value"] = new_value
+            changed = True
+    if changed:
+        binding.cookie_blob = crypto.encrypt_text(json.dumps(items, ensure_ascii=False))
+        binding.cookie_updated_at = utcnow()
+        db.commit()
+
+
 def create_binding_intent(db: Session, user: User, portal: Portal, binding: Binding | None = None) -> Binding:
     """创建（或为既有绑定续期）一次性登录授权 intent。"""
     if binding is None:
@@ -101,6 +121,13 @@ def activate_binding(
         raise BindingError("尚未检测到有效登录态：请在官网完成登录，插件会自动重试", status_code=409)
     except AdapterError:
         pass  # 结构性错误（字段映射等）不阻碍激活：落库后由同步环节回报并校准
+
+    # 探测期自愈刷新出的 Cookie（如飞书 CSRF 轮换）并入落库值
+    if ctx_probe.refreshed_cookies:
+        for entry in clean:
+            new_value = ctx_probe.refreshed_cookies.get(entry["name"])
+            if new_value:
+                entry["value"] = new_value
 
     binding.cookie_blob = crypto.encrypt_text(cookie_json)
     binding.cookie_updated_at = utcnow()

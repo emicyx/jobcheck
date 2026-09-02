@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import type { Application } from '../types'
 import { useBoardStore } from '../stores/board'
+import { shortLabel } from '../utils/stages'
 import { fmtDateTime } from '../utils/format'
 
-defineProps<{ app: Application }>()
+withDefaults(defineProps<{ app: Application; showStatus?: boolean }>(), { showStatus: false })
 defineEmits<{ (e: 'open', id: number): void }>()
 
 const store = useBoardStore()
@@ -18,7 +19,12 @@ const store = useBoardStore()
     @keydown.enter="$emit('open', app.id)"
   >
     <div class="company">
-      {{ app.company }}
+      <span class="company-name">{{ app.company }}</span>
+      <span
+        v-if="showStatus"
+        class="status-chip"
+        :title="store.statusLabel(app.current_status)"
+      >{{ shortLabel(app.current_status, store.statusLabel(app.current_status)) }}</span>
       <span class="src-badge" :class="{ 'is-auto': app.source === 'auto' }">
         {{ app.source === 'auto' ? '自动' : '手动' }}
       </span>
@@ -39,6 +45,17 @@ const store = useBoardStore()
 </template>
 
 <style scoped>
+.company { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.company-name { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-chip {
+  flex: none;
+  display: inline-flex; align-items: center;
+  font-size: 11px; line-height: 1;
+  padding: 3px 6px; border-radius: 4px;
+  color: var(--status-color, var(--ink-2));
+  background: var(--brand-soft);
+  background: color-mix(in srgb, var(--status-color, var(--brand)) 10%, #ffffff);
+}
 .tags { gap: 10px; }
 .tag-chip { display: inline-flex; align-items: center; gap: 4px; }
 .tag-dot { width: 6px; height: 6px; border-radius: 50%; }

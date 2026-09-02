@@ -30,6 +30,9 @@ class RawApplication:
 @dataclass
 class AdapterContext:
     cookies: dict[str, str] = field(default_factory=dict)
+    # 运行期自愈刷新出的 Cookie 新值（如飞书 CSRF 轮换）：适配器写入，
+    # 调用方（sync/activate）负责合并回加密存储，下轮轮询不再依赖旧值
+    refreshed_cookies: dict[str, str] = field(default_factory=dict)
 
 
 class BaseAdapter:
@@ -59,5 +62,7 @@ def get_adapter(provider_key: str) -> BaseAdapter:
 
 
 from app.adapters.json_adapter import JSONAPIAdapter  # noqa: E402
+from app.adapters.recipe_adapter import RecipeAdapter  # noqa: E402
 
 register_adapter("json_adapter", JSONAPIAdapter)
+register_adapter("recipe", RecipeAdapter)

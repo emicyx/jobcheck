@@ -10,8 +10,10 @@ from app.domain.statuses import BY_KEY
 # 通用兜底规则：跨门户常见文案（按优先级排序，先匹配先得）
 _GENERIC_RULES: list[tuple[str, str]] = [
     (r"offer|录用|入职通知", "offer"),
-    (r"已拒绝|不合适|未通过|淘汰|感谢信", "rejected"),
-    (r"流程终止|已关闭|岗位取消|招聘结束", "closed"),
+    # 「不匹配」类是拒绝语义（bilibili 实盘「初筛阶段不匹配」曾被「初筛」关键词
+    # 抢先进了简历评估）；「人才库」= 落库不推进，与感谢信同为软拒绝；
+    # 「流程终止/岗位取消/招聘结束」原为独立 closed 状态，2026-09-02 并入（无区分价值）
+    (r"已拒绝|不合适|未通过|淘汰|感谢信|不匹配|人才库|流程终止|已终止|已关闭|岗位取消|招聘结束", "rejected"),
     (r"已撤回|取消投递", "withdrawn"),
     (r"终面|hr面|交叉面", "hr_interview"),
     (r"三面|第三轮", "interview_3"),
@@ -20,7 +22,7 @@ _GENERIC_RULES: list[tuple[str, str]] = [
     (r"面试", "interview_unknown"),  # 只说"面试中"时用轮次未知兜底
     (r"笔试", "written_test"),
     (r"测评|人才评估|在线测评", "assessment"),
-    (r"评估|筛选|简历", "screening"),
+    (r"评估|筛选|初筛|复筛|简历", "screening"),
     (r"已投递|投递成功", "applied"),
     (r"已入职", "onboarded"),
 ]

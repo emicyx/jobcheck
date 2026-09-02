@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api import account, applications, auth, bindings, meta, portals, samples, tags
+from app.api import account, admin, applications, auth, bindings, ext, meta, portals, samples, tags
 from app.core.config import settings
 from app.core.security import hash_password
 from app.db.database import Base, SessionLocal, engine
@@ -17,7 +17,7 @@ from app import scheduler as poll_scheduler
 
 
 def _ensure_columns() -> None:
-    """轻量迁移：create_all 不会给已存在的表加列，这里补齐 applications 的追踪列。"""
+    """轻量迁移：create_all 不会给已存在的表加列，这里补齐历史表的追踪列。"""
     with engine.connect() as conn:
         cols = {row[1] for row in conn.execute(text("PRAGMA table_info(applications)"))}
         for ddl in (
@@ -26,6 +26,22 @@ def _ensure_columns() -> None:
         ):
             col = ddl.split("ADD COLUMN ")[1].split()[0]
             if col not in cols:
+                conn.execute(text(ddl))
+        # M4：samples 表新增请求-响应对与管线状态列
+        scols = {row[1] for row in conn.execute(text("PRAGMA table_info(samples)"))}
+        for ddl in (
+            "ALTER TABLE samples ADD COLUMN network JSON",
+            "ALTER TABLE samples ADD COLUMN pipeline_status VARCHAR(16)",
+            "ALTER TABLE samples ADD COLUMN pipeline_note TEXT",
+        ):
+            col = ddl.split("ADD COLUMN ")[1].split()[0]
+            if col not in scols:
+                conn.execute(text(ddl))
+        # v0.5.5：snapshots 表新增裁剪 DOM（网络解析失败时的兜底提取原料）
+        snap_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(snapshots)"))}
+        for ddl in ("ALTER TABLE snapshots ADD COLUMN dom TEXT",):
+            col = ddl.split("ADD COLUMN ")[1].split()[0]
+            if col not in snap_cols:
                 conn.execute(text(ddl))
         conn.commit()
 
@@ -75,6 +91,8 @@ app.include_router(meta.router, prefix="/api")
 app.include_router(portals.router, prefix="/api")
 app.include_router(bindings.router, prefix="/api")
 app.include_router(samples.router, prefix="/api")
+app.include_router(admin.router, prefix="/api")
+app.include_router(ext.router, prefix="/api")
 
 
 @app.get("/api/health")

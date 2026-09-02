@@ -1,6 +1,5 @@
 """轮询调度：APScheduler 每分钟扫描到期绑定，门户级限速，失败退避。"""
 
-import asyncio
 import logging
 from datetime import timedelta
 
@@ -93,14 +92,16 @@ def start_scheduler(app) -> None:
     if not settings.scheduler_enabled:
         return
     try:
-        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        from apscheduler.schedulers.background import BackgroundScheduler
     except ImportError:
         logger.warning("apscheduler 未安装，轮询调度未启动")
         return
 
-    scheduler = AsyncIOScheduler()
+    # 用独立线程池的 BackgroundScheduler：轮询是阻塞 IO（DB + HTTP），
+    # 不应挂在 uvicorn 的事件循环线程里
+    scheduler = BackgroundScheduler()
     scheduler.add_job(
-        lambda: asyncio.get_event_loop().run_in_executor(None, run_due_syncs),
+        run_due_syncs,
         "interval",
         seconds=settings.scheduler_tick_seconds,
         id="jobcheck-poll",

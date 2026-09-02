@@ -31,8 +31,10 @@ _STATUSES: list[StatusDef] = [
     StatusDef("offer", "已发Offer", "progress", 90, "#4f9e57"),
     StatusDef("onboarded", "已入职", "progress", 100, "#2e7d4f"),
     # ── 终态 ──
+    # 「流程终止」（closed）已并入 rejected：岗位取消/招聘结束/流程终止与被拒
+    # 对求职者同为「此路不通」，无区分价值（2026-09-02 合并）；原文语义仍由
+    # raw_status_text 保留
     StatusDef("rejected", "已拒绝", "terminal", 110, "#c25a5a"),
-    StatusDef("closed", "流程终止", "terminal", 120, "#8a8f98"),
     StatusDef("withdrawn", "已撤回", "terminal", 130, "#98907f"),
     StatusDef("expired", "已过期", "terminal", 140, "#7d8590"),
     # ── 特殊 ──

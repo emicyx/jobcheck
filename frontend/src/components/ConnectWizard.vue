@@ -9,7 +9,7 @@ const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ (e: 'update:show', v: boolean): void; (e: 'bound'): void }>()
 
 const message = useMessage()
-const { extReady, sampleArmed, phase, error, synced, syncDetail, start, reset, detectExtension } = useBindFlow()
+const { extReady, extStale, sampleArmed, phase, error, synced, syncDetail, start, reset, detectExtension } = useBindFlow()
 
 const visible = computed({
   get: () => props.show,
@@ -32,9 +32,12 @@ watch(visible, (v) => {
     reset()
     urlInput.value = ''
     portal.value = null
+    targetUrl.value = ''
     samplePhase.value = 'idle'
     portalsApi.list().then((list) => (portalList.value = list)).catch(() => {})
     setTimeout(detectExtension, 300)
+  } else {
+    stopSamplePoll()
   }
 })
 
@@ -45,14 +48,15 @@ async function identify(quiet = false) {
   try {
     const found = await portalsApi.identify(url)
     portal.value = found
+    // 所有结果分支（绑定/采样/打开网站）都依赖 targetUrl；必须在 quiet 轮询路径也赋值，
+    // 否则「识别未支持网站」时模板分支全部不命中，弹窗停在输入页毫无反馈
+    targetUrl.value = url
     if (!quiet) {
       if (found && found.enabled) {
-        targetUrl.value = url
+        // 已支持：portal 已赋值，视图自动切换到绑定流程
       } else if (found) {
-        targetUrl.value = url
         message.info(`已识别「${found.name}」，门户配置生成中，可通过采样加速`)
       } else {
-        targetUrl.value = url
         message.info('该网站尚未支持：可通过采样接入（需先用你的账号登录该网站）')
       }
     }
@@ -63,27 +67,65 @@ async function identify(quiet = false) {
   }
 }
 
-// 采样完成后：自动轮询识别，配置一生成立即进入绑定步骤
+// 采样完成后：自动轮询识别，配置一生成立即进入绑定步骤；失败则转手动
 let pollTimer: ReturnType<typeof setInterval> | undefined
-watch(samplePhase, (p) => {
+const sampleFailedNote = ref('')
+const sampleStalled = ref(false) // 超时未出结果：停止自动轮询但不算失败（后台可能仍在生成）
+
+function stopSamplePoll() {
   if (pollTimer) clearInterval(pollTimer)
+  pollTimer = undefined
+}
+
+async function pollSampleResult(tries: number) {
+  try {
+    await identify(true)
+    if (portal.value?.enabled) {
+      stopSamplePoll()
+      samplePhase.value = 'idle'
+      message.success(`「${portal.value.name}」配置已生成，现在可以绑定了`)
+      return
+    }
+    // 管线失败：停止轮询，引导转手动记录（样本已留存，后台可重试）
+    const mine = await samplesApi.mine()
+    const latest = mine.find((s) => s.status !== 'pending')
+    if (latest && latest.pipeline_status === 'failed') {
+      stopSamplePoll()
+      sampleFailedNote.value = latest.pipeline_note || '未能从该采样自动生成配置'
+      return
+    }
+  } catch { /* 静默重试 */ }
+  if (tries >= 60) {
+    stopSamplePoll()
+    sampleStalled.value = true
+  }
+}
+
+watch(samplePhase, (p) => {
+  stopSamplePoll()
+  sampleFailedNote.value = ''
+  sampleStalled.value = false
   if (p === 'done') {
     let tries = 0
-    pollTimer = setInterval(async () => {
-      tries += 1
-      try {
-        await identify(true)
-        if (portal.value?.enabled) {
-          clearInterval(pollTimer)
-          samplePhase.value = 'idle'
-          message.success(`「${portal.value.name}」配置已生成，现在可以绑定了`)
-        }
-      } catch { /* 静默重试 */ }
-      if (tries >= 60) clearInterval(pollTimer) // 约 8 分钟后停止自动轮询
-    }, 8000)
+    pollSampleResult(++tries) // 立即查一次：离线管线毫秒级完成，不必等首个 8 秒
+    pollTimer = setInterval(() => pollSampleResult(++tries), 8000) // 约 8 分钟后停止自动轮询
   }
 })
-onUnmounted(() => pollTimer && clearInterval(pollTimer))
+onUnmounted(stopSamplePoll)
+
+// 手动重试检测要有可见反馈，否则插件无应答时用户会觉得「点了没反应」
+function retryDetect() {
+  detectExtension()
+  setTimeout(() => {
+    if (!extReady.value) {
+      message.warning(
+        extStale.value
+          ? '插件刚被重新加载：请刷新本页（F5）后继续'
+          : '仍未检测到插件：请确认已在 chrome://extensions 加载并启用，且插件面板顶部版本号不低于 v0.4.4',
+      )
+    }
+  }, 800)
+}
 
 function pickPortal(p: Portal) {
   portal.value = p
@@ -118,14 +160,19 @@ async function startSampling() {
       '*',
     )
     samplePhase.value = 'collecting'
-    // 凭证交接回执：插件没回话说明内容脚本不在场（未装/未刷新）
+    // 凭证交接回执：插件没回话说明内容脚本不在场（未装/未刷新/已被重载成孤儿）
     setTimeout(() => {
       if (!sampleArmed.value) {
-        message.warning('未收到插件回执：请确认插件已安装并在 chrome://extensions 重新加载后，刷新本页重试')
+        message.warning(
+          extStale.value
+            ? '插件刚被重新加载：请刷新本页（F5）后重新点「开始采样」'
+            : '未收到插件回执：请确认插件已安装并在 chrome://extensions 重新加载后，刷新本页重试',
+        )
       }
     }, 1600)
   } catch (e: any) {
     message.error(e?.message || '发起采样失败')
+    samplePhase.value = 'idle' // 回到「开始采样」初始态，避免卡在无按钮可点的中间态
   } finally {
     sampling.value = false
   }
@@ -136,7 +183,7 @@ async function checkSample() {
   checking.value = true
   try {
     const list = await samplesApi.mine()
-    const latest = list[0]
+    const latest = list.find((s) => s.status !== 'pending')
     if (latest && latest.status !== 'pending') {
       samplePhase.value = 'done'
       message.success('采样已收到！门户配置生成后即可在这里绑定')
@@ -148,10 +195,12 @@ async function checkSample() {
   }
 }
 
-function openTarget() {
-  const url = targetUrl.value.includes('://') ? targetUrl.value : `https://${targetUrl.value}`
-  window.open(url, '_blank')
-}
+// 用真实 <a> 渲染「打开网站」（见模板）：window.open 在部分浏览器/设置下会被
+// 弹窗拦截器静默拦截，表现为「点了没反应」；纯链接跳转不会被拦截
+const targetHref = computed(() => {
+  const u = targetUrl.value.trim()
+  return u ? (u.includes('://') ? u : `https://${u}`) : ''
+})
 
 function onBound() {
   emit('bound')
@@ -177,12 +226,13 @@ const showBindFlow = computed(() => portal.value !== null && portal.value.enable
 
 <template>
   <n-modal v-model:show="visible" preset="card" title="接入自动追踪" :style="{ width: '540px', maxWidth: 'calc(100vw - 32px)' }">
-    <!-- 第 1 步：识别门户 -->
-    <template v-if="!portal">
+    <!-- 第 1 步：识别门户（尚未识别过任何结果；识别完成但未支持时走下方"未支持"分支，
+         条件必须含 !targetUrl，否则该输入分支会短路后面所有 !portal 的分支） -->
+    <template v-if="!portal && !targetUrl">
       <p class="hint">粘贴公司校招官网的任意页面链接，平台识别后引导你完成登录绑定；未支持的网站可一键采样接入。</p>
-      <n-input v-model:value="urlInput" placeholder="https://join.qq.com/ 或 hr.xiaomi.com" @keyup.enter="identify">
+      <n-input v-model:value="urlInput" placeholder="https://join.qq.com/ 或 hr.xiaomi.com" @keyup.enter="identify()">
         <template #suffix>
-          <n-button size="tiny" :loading="identifying" @click="identify">识别</n-button>
+          <n-button size="tiny" :loading="identifying" @click="identify()">识别</n-button>
         </template>
       </n-input>
 
@@ -203,10 +253,13 @@ const showBindFlow = computed(() => portal.value !== null && portal.value.enable
       </div>
       <p v-if="portal.note" class="hint">{{ portal.note }}</p>
 
-      <n-alert v-if="!extReady && bindPhase === 'idle'" type="warning" :show-icon="false" class="mb">
+      <n-alert v-if="extStale && bindPhase === 'idle'" type="warning" class="mb">
+        插件刚被重新加载，本页与它的连接已断开：请<b>刷新本页（F5）</b>后再继续。
+      </n-alert>
+      <n-alert v-else-if="!extReady && bindPhase === 'idle'" type="warning" :show-icon="false" class="mb">
         未检测到浏览器插件。<a href="/api/extension/download" download><b>点此下载压缩包</b></a>，解压后到
         <b>chrome://extensions</b> 打开开发者模式 →「加载已解压的扩展程序」→ 选择 <code>extension/</code> 文件夹，装好后
-        <a @click="detectExtension">点此重试检测</a>。
+        <a @click="retryDetect">点此重试检测</a>。
       </n-alert>
       <n-alert v-else-if="extReady" type="success" :show-icon="false" class="mb">插件已就绪 ✓</n-alert>
 
@@ -219,7 +272,7 @@ const showBindFlow = computed(() => portal.value !== null && portal.value.enable
       <div class="actions">
         <n-button v-if="bindPhase === 'idle'" type="primary" :loading="starting" :disabled="!extReady" @click="goLogin">去登录</n-button>
         <n-button v-if="bindPhase === 'failed'" type="primary" @click="goLogin">重新发起绑定</n-button>
-        <n-button quaternary @click="((portal = null), reset())">返回</n-button>
+        <n-button quaternary @click="((portal = null), (targetUrl = ''), reset())">返回</n-button>
       </div>
     </template>
 
@@ -242,12 +295,20 @@ const showBindFlow = computed(() => portal.value !== null && portal.value.enable
         JobCheck 插件图标，在弹出的面板里点「采集当前页面」。采样只包含该页数据，用于生成追踪配置。
       </p>
 
-      <n-alert v-if="samplePhase === 'collecting' || samplePhase === 'done'" :type="samplePhase === 'done' ? 'success' : 'info'" class="mb">
+      <n-alert v-if="samplePhase === 'collecting' || samplePhase === 'done'"
+        :type="samplePhase === 'collecting' ? 'info' : sampleFailedNote ? 'error' : sampleStalled ? 'warning' : 'success'" class="mb">
         <template v-if="samplePhase === 'collecting'">
           采样已就绪：去目标网站的「我的投递」页，点插件图标并在面板里点「采集当前页面」，完成后回到这里确认。
         </template>
+        <template v-else-if="!sampleFailedNote && !sampleStalled">
+          采样已收到 ✓ 正在自动生成追踪配置（分析页面结构与接口数据，通常 1–3 分钟），完成后这里会自动变为可绑定。
+        </template>
+        <template v-else-if="sampleStalled">
+          配置生成耗时明显超出预期（通常 1–3 分钟），已暂停自动刷新。可点「重新识别」查看最新状态或重新采样；
+          也可以先<b>手动记录</b>该公司的投递（看板「新增投递」），采样已留存。
+        </template>
         <template v-else>
-          采样已收到 ✓ 配置生成后这里会自动变为可绑定（每 8 秒检查一次）。
+          自动接入未能完成：{{ sampleFailedNote }}。可先<b>手动记录</b>该公司的投递（看板「新增投递」），采样已留存，稍后可重试。
         </template>
       </n-alert>
 
@@ -256,10 +317,12 @@ const showBindFlow = computed(() => portal.value !== null && portal.value.enable
           开始采样
         </n-button>
         <n-button v-if="samplePhase === 'collecting'" type="primary" :loading="checking" @click="checkSample">我已采集，确认</n-button>
-        <n-button v-if="samplePhase === 'done'" type="primary" :loading="identifying" @click="identify()">重新识别</n-button>
-        <n-button secondary @click="openTarget">打开网站</n-button>
-        <n-button quaternary @click="((portal = null), (samplePhase = 'idle'))">返回</n-button>
+        <n-button v-if="samplePhase === 'done' && !sampleFailedNote" type="primary" :loading="identifying" @click="identify()">重新识别</n-button>
+        <n-button v-if="sampleFailedNote || sampleStalled" secondary @click="((samplePhase = 'idle'), (sampleFailedNote = ''), (sampleStalled = false))">重新采样</n-button>
+        <n-button v-if="!!targetHref" secondary tag="a" :href="targetHref" target="_blank" rel="noopener">打开网站</n-button>
+        <n-button quaternary @click="((portal = null), (targetUrl = ''), (samplePhase = 'idle'), (sampleFailedNote = ''), (sampleStalled = false))">返回</n-button>
       </div>
+      <p v-if="!!targetHref" class="hint" style="margin-top: 8px">「打开网站」将访问：{{ targetHref }}</p>
     </template>
 
     <!-- 识别为 null 且未开始采样：提示 + 采样入口 -->

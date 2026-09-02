@@ -23,6 +23,7 @@ async function logout() {
     </div>
     <nav class="nav">
       <router-link :to="{ name: 'board' }">看板</router-link>
+      <router-link v-if="auth.user?.role === 'admin'" :to="{ name: 'admin' }">管理</router-link>
       <router-link :to="{ name: 'settings' }">设置</router-link>
       <a class="guide-link" @click="guideShow = true">指南</a>
       <span class="email">{{ auth.user?.email }}</span>

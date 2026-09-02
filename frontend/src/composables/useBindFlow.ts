@@ -7,6 +7,7 @@ import { onUnmounted, ref } from 'vue'
  */
 export function useBindFlow() {
   const extReady = ref(false)
+  const extStale = ref(false) // 插件在 chrome://extensions 被重载过：本页的内容脚本已成孤儿，须刷新本页
   const sampleArmed = ref(false) // 插件已收到采样凭证的回执
   const phase = ref<'idle' | 'waiting' | 'success' | 'failed'>('idle')
   const error = ref('')
@@ -85,7 +86,15 @@ export function useBindFlow() {
   const onMessage = (ev: MessageEvent) => {
     const msg = ev.data
     if (!msg || msg.source !== 'jobcheck-ext') return
-    if (msg.type === 'jc.pong') extReady.value = true
+    if (msg.type === 'jc.pong') {
+      extReady.value = true
+      extStale.value = false
+    }
+    if (msg.type === 'jc.contextInvalidated') {
+      // 旧内容脚本回的失效信号：插件本体还在（刚被重载），只是本页的桥断了
+      extReady.value = false
+      extStale.value = true
+    }
     if (msg.type === 'jc.sampleArmed') {
       extReady.value = true
       sampleArmed.value = true
@@ -115,5 +124,5 @@ export function useBindFlow() {
     stopPolling()
   })
 
-  return { extReady, sampleArmed, phase, error, synced, syncDetail, start, reset, detectExtension }
+  return { extReady, extStale, sampleArmed, phase, error, synced, syncDetail, start, reset, detectExtension }
 }

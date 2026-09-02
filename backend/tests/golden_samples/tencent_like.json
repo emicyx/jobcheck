@@ -1,0 +1,40 @@
+{
+  "description": "腾讯校招 join.qq.com 采样复刻（2026-09-01 校准实战的结构复制品）：单对象列表 + 数字码状态 + 响应含 resumeId。真实采样到位后可直接替换本文件。",
+  "sample": {
+    "url": "https://join.qq.com/progress.html",
+    "dom": "<html><head><title>应聘进度 - 腾讯校园招聘</title></head><body><div id=\"app\" class=\"progress-page\"><div class=\"header\"><span>腾讯校招</span></div><div class=\"progress-card\"><div class=\"position-name\">后端开发工程师（腾讯云）</div><div class=\"status-text\">当前状态：简历筛选中</div><div class=\"candidate-info\">张三 13800138000</div></div></div></body></html>",
+    "network": [
+      {
+        "url": "https://join.qq.com/api/v1/apply/getApplyProcess?resumeId=123456789",
+        "method": "GET",
+        "params": { "resumeId": "123456789" },
+        "request_body": "",
+        "response_body": "{\"code\":0,\"msg\":\"ok\",\"data\":{\"resumeId\":123456789,\"applyTime\":\"2026-08-20 10:30:00\",\"positionInfo\":{\"applyPositionTxt\":\"后端开发工程师（腾讯云）\",\"department\":\"CSIG-腾讯云产品\",\"workPlace\":\"深圳\"},\"currentStatus\":{\"status\":2,\"desc\":\"简历筛选中\"}}}"
+      },
+      {
+        "url": "https://join.qq.com/log/report?evt=page_view&t=1725168000000",
+        "method": "POST",
+        "params": { "evt": "page_view" },
+        "request_body": "{\"evt\":\"page_view\"}",
+        "response_body": "{\"ok\":1}"
+      },
+      {
+        "url": "https://join.qq.com/static/config.js",
+        "method": "GET",
+        "params": {},
+        "request_body": "",
+        "response_body": "window.__config={version:'1.0'}"
+      }
+    ]
+  },
+  "expected": {
+    "records": [
+      { "job_title": "后端开发工程师（腾讯云）", "status_raw": "2" }
+    ],
+    "list_json_path": "data",
+    "field_map": {
+      "job_title": "positionInfo.applyPositionTxt",
+      "status_raw": "currentStatus.status"
+    }
+  }
+}

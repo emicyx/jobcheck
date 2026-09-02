@@ -31,7 +31,7 @@ MOCK_PORTAL = dict(
         "status_map": [
             {"pattern": "简历评估", "status": "screening"},
             {"pattern": "笔试", "status": "written_test"},
-            {"pattern": "已终止", "status": "closed"},
+            {"pattern": "已终止", "status": "rejected"},
         ],
     },
 )
@@ -109,7 +109,7 @@ TENCENT_PORTAL = dict(
         "session_invalid_markers": ["请登录", "not login"],
         "status_map": [
             {"pattern": "^2$", "status": "screening"},
-            {"pattern": "^4$", "status": "closed"},
+            {"pattern": "^4$", "status": "rejected"},
         ],
     },
 )
@@ -120,7 +120,9 @@ PENDING_PORTALS = [
     _pending("携程校招", "携程", ["campus.ctrip.com", "careers.ctrip.com", "job.ctrip.com"],
              "https://job.ctrip.com/", "自研系统；待采样生成配置（投递页：登录后「申请记录」）"),
     _pending("去哪儿校招", "去哪儿", ["campus.qunar.com", "jobs.feishu.cn"],
-             "https://campus.qunar.com/", "飞书招聘；待采样生成配置（投递页：登录后「我的投递」）"),
+             "https://campus.qunar.com/",
+             "飞书招聘；已内置飞书平台模板（结构指纹），采样后自动实例化接入——"
+             "本地可先用 Mock 飞书门户验证（python -m scripts.mock_feishu_portal，127.0.0.1:8902）"),
 ]
 
 SEEDS = [MOCK_PORTAL, XIAOMI_PORTAL, TENCENT_PORTAL, *PENDING_PORTALS]

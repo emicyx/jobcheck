@@ -46,3 +46,11 @@ def identify(payload: IdentifyIn, db: Session = Depends(get_db), _: User = Depen
             if domain and domain.lower() in host:
                 return portal
     return None
+
+
+@router.get("/connected")
+def connected_sites(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """当前用户的「已连接站点」（扩展访问时快照建档的门户）——Settings 展示用。"""
+    from app.services.ingest import list_connected_sites
+
+    return {"sites": list_connected_sites(db, user.id)}

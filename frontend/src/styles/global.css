@@ -32,7 +32,7 @@ body {
   background-size: 24px 24px;
 }
 
-/* ── 看板布局 ─────────────────────────────── */
+/* ── 看板布局：阶段列等分铺满屏宽，不再依赖横向滚动 ── */
 .board-scroll {
   flex: 1;
   min-height: 0; /* flex 子项必须允许收缩，否则列高度塌陷、滚动条浮到页面中部 */
@@ -44,17 +44,21 @@ body {
 
 .board-columns {
   display: flex;
-  gap: 14px;
+  gap: 12px;
   flex: 1;
   align-items: stretch;
+  min-width: 0;
 }
 
 .board-col {
-  flex: 0 0 264px;
+  flex: 1 1 0;
+  min-width: 200px; /* 窄屏兜底：允许横向滚动而不是把卡片压扁 */
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
+
+.col-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 
 .board-col-head {
   display: flex;
@@ -62,11 +66,11 @@ body {
   gap: 8px;
   padding: 10px 12px;
   border-bottom: 2px solid var(--line);
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   flex: none;
 }
 
-.board-col-title { font-weight: 600; letter-spacing: 0.02em; }
+.board-col-title { font-weight: 600; letter-spacing: 0.02em; white-space: nowrap; }
 
 .board-col-count {
   margin-left: auto;
@@ -78,6 +82,31 @@ body {
   padding: 0 8px;
 }
 
+.board-col.is-filtered .board-col-head { border-bottom-color: var(--col-color, var(--brand)); }
+.board-col.is-filtered .board-col-count { background: var(--col-color, var(--brand)); color: #fff; }
+
+.col-collapse-btn {
+  border: none; background: transparent; color: var(--ink-3); cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 2px 6px; border-radius: 4px; flex: none;
+}
+.col-collapse-btn:hover { background: var(--brand-soft); color: var(--ink); }
+.col-collapse-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+
+/* 列头细分状态筛选片（多状态列） */
+.board-col-sub { display: flex; flex-wrap: wrap; gap: 4px; flex: none; padding: 0 12px; margin-bottom: 8px; }
+.sub-chip {
+  border: none; cursor: pointer; font-family: inherit;
+  font-size: 11px; line-height: 1; padding: 4px 8px; border-radius: 999px;
+  background: var(--brand-soft); color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.sub-chip em { font-style: normal; opacity: 0.75; margin-left: 3px; }
+.sub-chip:hover { background: #e2e9f2; color: var(--ink); }
+.sub-chip.is-active { background: var(--chip-color, var(--brand)); color: #fff; }
+.sub-chip.is-active em { opacity: 0.9; }
+.sub-chip:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+
 .board-col-body {
   flex: 1;
   overflow-y: auto;
@@ -88,8 +117,38 @@ body {
   padding-bottom: 40px;
 }
 
+.board-col-empty {
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 16px 8px;
+  text-align: center;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
 .board-col.is-terminal .board-col-head { border-bottom-color: #f0f1f3; }
 .board-col.is-terminal .board-col-title { color: var(--ink-2); font-weight: 500; }
+.board-col.is-terminal.is-filtered .board-col-head { border-bottom-color: var(--col-color, var(--brand)); }
+
+/* 终态列折叠后的竖向细条 */
+.board-rail {
+  flex: 0 0 44px;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--card);
+  cursor: pointer; padding: 12px 0; font-family: inherit;
+  transition: border-color 0.15s ease;
+}
+.board-rail:hover { border-color: #c9d2dd; }
+.board-rail:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.board-rail .rail-count {
+  font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums;
+  background: var(--brand-soft); border-radius: 10px; padding: 1px 8px;
+}
+.board-rail .rail-label {
+  writing-mode: vertical-rl; letter-spacing: 0.24em;
+  font-size: 12px; color: var(--ink-2);
+}
+.board-rail .rail-arrow { color: var(--ink-3); font-size: 13px; }
 
 /* ── 投递卡片：左侧状态色索引条是卡片唯一允许的彩色 ── */
 .app-card {
