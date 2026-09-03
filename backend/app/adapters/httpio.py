@@ -46,7 +46,7 @@ def request_json(
 ) -> tuple[int, str, object]:
     """发起请求并解析 JSON。返回 (status, text, json)。失效抛 SessionInvalidError。"""
     try:
-        # trust_env=False：绕过系统代理直连（本地 Mock 与国内官网均无需代理）
+        # trust_env=False：绕过系统代理直连（国内招聘官网无需代理）
         resp = httpx.request(
             method, url, cookies=cookies or {}, timeout=_TIMEOUT,
             params=extra_query, follow_redirects=False, trust_env=False,

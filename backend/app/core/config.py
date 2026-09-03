@@ -41,11 +41,22 @@ class Settings(BaseSettings):
     llm_classify_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
     llm_classify_model: str = "glm-4-flash"
     llm_classify_api_key: str = ""
+    # DOM 兜底解析（T3）：未知站点规则解析失败后，把裁剪 DOM 大纲交给 LLM 提取
+    # 投递记录。provider = heuristic 时该层关闭（返回 None，零成本），只有配置了
+    # api_key 才会产生真实调用；记账/月预算熔断与 T1/T2 共用（llm_calls 表）
+    llm_dom_provider: str = "heuristic"
+    llm_dom_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
+    llm_dom_model: str = "glm-4-flash"
+    llm_dom_api_key: str = ""
+    # DOM 大纲送入提示词的字符预算（裁剪 DOM ≤400KB，压成文本大纲后截断）
+    llm_dom_max_chars: int = 60_000
     # 记账价格（CNY / 百万 token，用于月预算熔断的估算）
     llm_recipe_price_in: float = 4.0
     llm_recipe_price_out: float = 16.0
     llm_classify_price_in: float = 0.5
     llm_classify_price_out: float = 2.0
+    llm_dom_price_in: float = 0.5
+    llm_dom_price_out: float = 2.0
     # 月预算熔断：超限后暂停 T1、T2 降级为直接标待确认，不影响已发布配方轮询
     llm_monthly_budget_cny: float = 100.0
     # 配方管线总开关（采样提交后是否自动触发生成）

@@ -18,7 +18,7 @@ def _seed(db):
     user = User(email="u1@test.com", password_hash=hash_password("password123"))
     db.add(user)
     db.flush()
-    portal = Portal(name="飞书演示", company="飞书", domains=["example.com"])
+    portal = Portal(name="飞书测试门户", company="飞书", domains=["example.com"])
     db.add(portal)
     db.flush()
     now = datetime.utcnow()
@@ -100,7 +100,7 @@ def test_applications_stats_distribution(client, db):
     keys = [s["key"] for s in data["by_status"]]
     assert keys.index("screening") < keys.index("written_test") < keys.index("rejected")
     assert data["top_companies"][0] == {"company": "小米", "count": 2}
-    assert data["top_portals"][0]["portal_name"] == "飞书演示"
+    assert data["top_portals"][0]["portal_name"] == "飞书测试门户"
 
 
 def test_snapshots_stats_by_route(client, db):

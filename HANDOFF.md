@@ -1,12 +1,179 @@
-# HANDOFF — 交接文档（2026-09-02 更新，新链路已转正为唯一接入方式）
+# HANDOFF — 交接文档（2026-09-03 更新，新链路已转正为唯一接入方式）
 
 > **新会话继续方式**：读 `REFACTOR_PLAN.md`（方案全文）+ 本文档（现场状态）。
-> 当前进度口令：「v0.6.1 已推：applied 并入 screening + 看板『我的数据』侧边栏；
-> 星环 0.5.5 重测仍待做；143 passed」。
+> 当前进度口令：「DOM 解析链路重构：可信度分门控 + 状态护栏（v0.6.3）；
+> T3 LLM DOM 解析层落地（dom_parse v2，glm-4-flash 在线标定通过，key 已配置）；
+> 扩展自动同步降频 3h（v0.6.1 扩展版，存量闹钟自动迁移，待重载插件）；
+> OPPO 校招平台规格落地；星环 0.5.5 重测仍待做；177 passed」。
 >
 > 前几轮：M0 → M1 → 转正 → v0.5.2/0.5.3/0.5.4（加密捕获迭代）→ v0.5.5（DOM 兜底）
 > → dom 纳入哈希（网易 duplicate 事故）→ 网易 DOM 链路首胜 + 炎魂三重事故修复
-> → v0.6.1（「已投递」并入 screening + 我的数据侧边栏 + /api/me/stats）。基线 **143 passed**。
+> → v0.6.1（「已投递」并入 screening + 我的数据侧边栏 + /api/me/stats）
+> → v0.6.2（mock 门户删除）→ OPPO 规格（2026-09-03）。基线 **177 passed**。
+
+## 0.00 DOM 解析链路重构：可信度分门控 + 状态护栏（2026-09-03，待提交）
+
+**附：真实 LLM 在线标定（glm-4-flash）三连坑与修复（同日）**。用户配置 key 后
+`python -m scripts.smoke_llm_dom.py` 冒烟三连跑暴露两个真实形态（假 LLM 测不出，
+这正是在线标定的价值）：
+
+- **① 图标字符粘进状态照抄**：大纲把 `[title=已拒绝]✕` 相邻渲染，模型返回
+  `已拒绝✕`，词元回查整块查不到 → 记录全拒。修复：大纲改 `<tag [title=x]> 文本`
+  带空格分隔；词元切分放宽为「任何非 `\w` 字符都是分隔符」（装饰符号 ✕◦✓ 不该
+  惩罚照抄忠实度）+ 短码（≤4 字符）整串回查兜底（数字状态「3」）；
+- **② 图标符号本身当 status_raw**：提示词 v2 明令禁止后模型仍返回 `✕`/`◦`
+  （语义放进 status 建议）——**提示词压不住模型的照抄倾向，歧义必须在表示层
+  消解**：大纲对「纯符号文本 + 有 title 属性」的元素直接以 title 作文本
+  （`<span.ico> 已拒绝`，装饰符号剔除）；后过滤同时拒绝纯符号 status_raw 双保险；
+- 冒烟最终通过：两记录状态/日期/部门全对，语义建议（已拒绝→rejected、
+  Interviewing→interview_unknown）正确。新增 2 回归（词元装饰符号容忍、
+  纯符号拒绝）；另发现用户本地新增 3 个 ingest 用例（work_location 重同步覆盖/
+  标题匹配部门未知/品牌噪声标题），与重构共存全绿。基线 → **177 passed**。
+
+**决策（用户拍板「非特殊模板网页接入 LLM 解析」+ 探寻最佳实践）**：
+规则解析在新站接入时多多少少有问题（事故史即证据），但不删规则全走 LLM——
+网络层（结构化 JSON）规则可靠且免费毫秒级，保留规则优先；DOM 层改为
+**规则先跑 + 可信度分门控**：`dom_plausibility()`（行数同构 0.45/单卡 0.10、
+日期覆盖 0.4、标题长度合规 0.15，阈值 0.5）——高分直接采信规则（快/省/
+跨快照确定），失败/低分交给 LLM 接管，**LLM 不可用（未配置/超预算/上游故障）
+时低分规则结果仍作降级兜底**（行为不劣于改造前）。**规则层冻结**：不再为新站
+人工补词典/正则，非模板版式由 LLM 负责——「简单」来自停止猫鼠游戏，不来自删代码。
+
+- 「规则成功但数据可疑」的判定问题就此闭环：低分即裁决，parse_note 落
+  「规则可信度 0.25 < 0.50，LLM 接管」/「LLM 不可用降级采信」可观测；
+- **状态护栏**（`sync.ingest_applications(suspect_guard=)`，仅 dom/llm_dom 路由
+  启用，网络层与绑定轮询不受影响）：状态机逆跳（offer→筛选，几乎必是选错行/
+  字段错位）与解析退化（已知状态→待确认，解析丢了语义）不覆盖已知状态——
+  **整条跳过**（状态/原文/日期必须同源，不得一半新一半旧），guarded 计数进
+  parse_note「拦截可疑状态变更 N 条」；真实重新投递通常产生新记录新卡，
+  误拦率低，被拦更新由下次同步重试；
+- **请求路径超时收紧**：`client.call_json` 支持 timeout/retries 覆写，
+  dom_parse 用 20s×1 次（默认 60s×3 最坏 ~3min 会拖死上报——扩展只等 30s，
+  这也是 T3 上线时就存在的隐患，本轮一并修复）；
+- 校准锚定：yanhun/bilibili golden ≥0.5（LLM 开启也不烧钱）；单卡无日期 0.25、
+  多行短标题 0.45、多行无日期 0.60（数值写进测试防漂移）。
+  新增 6 用例（低分被接管/降级兼容/上游故障/护栏逆跳+退化+正向放行/guard 关闭
+  保持旧行为/超时参数）。基线 163 → **169 passed**。
+
+## 0.01 扩展自动同步降频 1h → 3h（2026-09-03，v0.6.1，待提交）
+
+**决策（用户拍板）**：`jc-autosync` 由每小时降为每 3 小时——控站点风控压力与
+后端解析成本（T3 LLM DOM 兜底层上线后的量级考量；也把全量 LLM 解析的月预算
+压力降一个量级）。轮转逻辑不变（每 tick 回访一站，N 站点即每 3N 小时全量刷一遍）。
+
+- `background.js`：闹钟周期 60 → 180 分钟；**存量安装自动迁移**——守卫式创建
+  从「存在即跳过」改为比对 `periodInMinutes`，与 180 不一致才重建（旧 60 分钟
+  闹钟跨浏览器重启持久存在，只改 create 参数迁移不到）；周期字段缺失视为匹配，
+  宁可少迁移也不反复重建（0.5.1「闹钟被每分钟唤醒反复重置、永不触发」事故教训）。
+  SW 启动补跑阈值 55 → 175 分钟（周期 − 5 分钟惯例）；
+- 文案同步：popup 提示、SettingsView 引导文、extension/README、REFACTOR_PLAN
+  现状描述；manifest 0.6.0 → 0.6.1 + changelog 条目；
+- **发版动作**：`chrome://extensions` 重载插件（v0.6.1）即生效，重载后首个
+  周期内完成旧闹钟迁移；后端/前端无逻辑改动（前端仅文案，随下次构建发布）。
+
+
+## 0.02 T3 DOM 兜底 LLM 解析层（2026-09-03，待提交）
+
+**动机**：规则解析（平台规格/hints/启发式/规则版 dom_records）在新站接入时
+经常因版式与规格差异解析失败——规则版 dom_records 靠「同签名重复兄弟行 +
+状态词典」，对非模板版式天然乏力：状态藏在图标 `title` 属性（itertext 抽不到）、
+步骤条/时间线（当前节点 ≠ 状态词）、英文文案（词典只认中文）、阶段+进度拆两处。
+用户拍板引入 LLM 层解析未知网页 DOM。解析顺序变为：
+**平台规格 → hints → 启发式 → DOM 层（规则 + 可信度分门控）**——
+规则高分采信、失败/低分 LLM 接管、LLM 不可用规则降级兜底（§0.00 重构定稿）。
+
+- `app/llm/dom_parse.py`（新模块，M3 清理不受影响——不依赖 pipeline/
+  fingerprint/validator/preprocess/prompts）：
+  - `dom_outline()`：裁剪 DOM → 文本大纲（只留有直接文本/title 属性的元素，
+    一行一块、缩进=层级、class/id/title 标注）；真实 golden 实测 ~4× 压缩
+    （炎魂 5821→1395、bilibili 5245→1523），预算 `LLM_DOM_MAX_CHARS=60000`
+    截断带标记；
+  - `parse_dom_snapshot()`：provider 装配（`LLM_DOM_PROVIDER`，默认 heuristic
+    = 层关闭零成本）→ 大纲 → `client.call_json(task="dom_parse")`（记账/
+    重试/月预算熔断全部复用 T1/T2 基建）→ pydantic 宽松 Schema → 后过滤；
+  - 后过滤（宁缺毋错）：page_type≠applications 整体不采信（职位列表页带
+    records 也不建卡）、逐条 conf≥0.5、title/status 非空、备案/版权/人才库
+    噪声正则（沿用炎魂/bilibili 事故同款）、≤50 条、**反幻觉词元回查**
+    （status_raw/job_title 按分隔符切块，任一块须能在页面大纲中找到，
+    整块查不到=编造，整条丢弃）；
+  - 结果缓存：`(dom sha256, model, prompt_version)` 进程内 LRU（128），
+    同 DOM 重复解析（自愈回放）只调一次 LLM；
+- `prompts/dom_parse.md` v1：状态识别方法论沉淀成提示词——负面清单
+  （职位广告/导航/表头/页脚/页面级横幅/操作按钮）、状态六形态（徽章/步骤条
+  当前节点/时间线最新条/阶段+进度组合/title 属性/英文）、**status_raw 逐字
+  照抄不改写**（语义判断留给下游）、宁缺毋错（漏一条远好过错一条）、
+  `{{STATUS_ENUMS}}` 从状态机单一事实源动态注入；
+- 语义沉淀：LLM 高置信建议（conf≥0.9）在门户建档后经
+  `deposit_suggestions()` 写成门户级 StatusRule（复用 T2 的
+  `classify._save_rule`，仅当既有规则解析不出时沉淀，绝不覆盖人工/实证规则）
+  ——英文文案/生僻状态原文下次同步确定性命中，零成本；route=`llm_dom`
+  （parse_note 带「沉淀状态规则 N 条」）；
+- 配置：`LLM_DOM_PROVIDER/BASE_URL/MODEL/API_KEY/PRICE_IN/OUT/MAX_CHARS`
+  （默认 glm-4-flash 计价 0.5/2 CNY/百万 token）；
+- 测试 `test_llm_dom_parse.py` 15 例：大纲压缩（保留/截断/噪声形态）、
+  provider 关闭零调用、假 LLM 全链路（提示词装配含枚举注入 + URL + title
+  属性）、缓存单次调用、上游异常/预算熔断降级 None、职位列表页不采信、
+  反幻觉/噪声/低置信逐条丢弃、沉淀只写未解析原文、API 全链路
+  （非模板 DOM：状态在 title 属性 + 英文文案 → route=llm_dom 建档落卡 +
+  Written Test 经沉淀规则归一 written_test）、规则层可解时不烧 LLM。
+  基线 148 → **163 passed**。
+- **未做（后续可加）**：真实 LLM 在线标定（当前只有假 LLM 回归）；云端启用
+  需在 .env 配 `LLM_DOM_PROVIDER=openai_compatible` + `LLM_DOM_API_KEY`。
+
+## 0.03 OPPO 校招解析规格：流程节点状态 + dig 过滤段（2026-09-03，待提交）
+
+**云端实盘异常**（用户部署到云服务器后报 OPPO 解析异常，
+`careers.oppo.com/university/oppo/center/history`）：非环境问题——本地同样
+解析不了，根因是引擎缺 OPPO 规格。按官网前端 bundle 逆向校准（无真实账号
+采样，字段名/节点码均出自渲染代码）：
+
+- 接口 `GET /api/delivery/queryAllDeliveryProgressList` →
+  `data[].deliveryPositionRecordList[]`；**投递条目上没有平铺状态字段**——
+  状态在 `flowProcessTemplateList` 流程节点数组里（`flowProcessStatus`：
+  PASS 已过 / THE_ONGOING 当前 / NOT_PASS 被拒 / DID_NOT_ARRIVE 未到），
+  页面状态文案由前端计算，网络层三层解析（平台规格→hints→启发式）全落空，
+  只能掉进 DOM 兜底抽渲染文本（已实证 `parse_snapshot_network` 返回 None）。
+- `fields.dig` 新增过滤段语义：路径段 `key=value` 在 dict 数组上选中首个
+  `element[key]==value` 的元素再下探——否则表达不了「取进行中的那个节点」；
+  `+` 拼接子路径现在 strip（带空格的拼接路径此前静默取 None）。
+- OPPO 规格 status_raw 拼接链：`NOT_PASS 标记 > THE_ONGOING 节点码 >
+  末节点码`（全 PASS 即流程走完），靠 status_map 先到先得拼出终语义，
+  **NOT_PASS 规则必须排在阶段规则之前**（被拒时当前节点码仍会拼进串）；
+  `?type=old` 旧接口（deliveryDynamicsList）与社招接口（平铺
+  publishName/firstAcceptNode）形状不同，未实证不猜。
+- `PlatformParseSpec` 增加 `brand` 兜底名（OPPO 响应无租户内嵌、无 DOM 时
+  门户命名不再落 host）；**存量门户自愈**：upsert 刷新 hints 时同步补写
+  实证 status_map（dom 期建的门户拿到码表，下次同步恢复）。
+- golden `oppo_progress_like.json`（bundle 逆向还原，占位数据）+ 5 用例：
+  golden 参数化 / 状态拼接链 / dig 过滤段 / 存量门户补写 / API 全链路
+  （3 卡：screening/rejected/offer）。基线 143 → **148 passed**。
+- **云端恢复步骤**：部署新代码 → 重访 OPPO 历史页（或 popup「同步当前页」，
+  同域 10 分钟节流照常）→ 平台规格命中自动建档「OPPO」；若异常期已建
+  dom 错卡，删 OPPO 门户及其卡片后重同步（错卡无 portal_key，标题对不上
+  会留重复卡）。插件无需更新。
+
+## 0.04 v0.6.2：删除全部 mock 招聘门户，以真实站为基准（2026-09-02，待提交）
+
+**决策（用户拍板）**：mock 招聘网站全部删除（含飞书契约 mock），平台只面向真实
+招聘站；飞书模板回归测试改用固化 golden 样本，覆盖零损失。
+
+- 删脚本：`scripts/mock_portal.py`（8901 纯演示）、`scripts/mock_feishu_portal.py`
+  （8902 契约复刻，数据已固化）、`scripts/e2e_verify_sample_flow.py`
+  （旧架构手工验证，依赖 8902，随旧链路废弃）。
+- 固化 `tests/golden_samples/feishu_like.json`：从 mock `_delivery()` 原样导出
+  （8001 服务端/8002 算法/8003 产品培训生 + operation_list 时间线，数据确定性）；
+  `test_feishu_template.py` 的 `_feishu_network()` 改读 golden，`WEBSITE_PATH="704852"`
+  内联，**全部断言不变**（CSRF 自愈用例本就只用响应体 + httpx 桩），7 用例照常通过。
+- 测试中性化：`test_m2_bindings` fixture「Mock 演示门户/演示公司」→
+  「测试门户/测试公司」（FakeAdapter 离线，值无实际作用）；
+  `test_admin_dashboard`「飞书演示」→「飞书测试门户」。
+- `seed_portals.py` 删 MOCK_PORTAL（只留真实门户种子）；`start_dev.bat` 只起后端+前端。
+- DB 清理：portal 1（Mock 演示门户）+ 演示公司 3 条投递 + 4 条状态历史已删
+  （删前复核无绑定/标签关联）；现存 9 门户 / 9 条投递全部真实。
+- 文档：README 删 8901/8902 本地演示段（飞书模板段改为真实站描述 + golden 说明）、
+  REFACTOR_PLAN e2e 行去 mock、适配器注释去「本地 Mock」措辞。
+- M0_BASELINE 为历史基线记录，其中 Mock 行/绑定 1 记录按历史保留。
+- jc-e2e.html / 扩展 / 前端源码零 mock 依赖，未动。
 
 ## 0.05 v0.6.1：「已投递」状态移除 + 看板「我的数据」侧边栏（2026-09-02 夜，已推 4edf39d）
 
@@ -120,8 +287,11 @@ popup duplicate 时显示「补建了 N 张缺失的卡片」。
 ## 0. 必须遵守的纪律（不变）
 
 - 「不要修了一个丢了上一个」：每个真实失败形态沉淀 golden/回归用例；
-- 任何改动后 `cd backend && python -m pytest -q` 全绿（当前基线 **143 passed**）；
-- 既有真实流程改动后要线上复验；看板/手动记录/状态机/T2 分类零回归。
+- 任何改动后 `cd backend && python -m pytest -q` 全绿（当前基线 **177 passed**）；
+- 既有真实流程改动后要线上复验；看板/手动记录/状态机/T2 分类零回归；
+- **真实站点测试数据不入库**（2026-09-03 用户拍板）：站点专属 golden/快照
+  放 `backend/tests/golden_samples/private/`（gitignore），测试加载器
+  双目录查找、缺失即 skip——克隆环境不失败，本地全量回归照常。
 
 ## 0.15 星环二测事故与 v0.5.3（2026-09-02 下午）
 
@@ -201,7 +371,7 @@ popup 显示「已识别 N 条」+ 看板出卡 + 设置页站点「正常」→
    点 JobCheck 图标 → 空闲面板输入配对码（显示「✓ 已配对 · 自动采集中」）；
 3. 打开该企业招聘站「我的投递 / 应聘进度」页——几秒后卡片自动出现；
    检测漏报时点 popup 里的「**同步当前页**」手动兜底；
-4. 之后每小时插件静默回访一次已连接站点刷状态；某站显示「疑似未登录」时去该站
+4. 之后插件每 3 小时静默回访一次已连接站点刷状态（0.6.1 起降频，原每小时）；某站显示「疑似未登录」时去该站
    重新登录一次即可恢复。
 
 ## 2. 转正改动了什么（本轮新增代码）
@@ -233,12 +403,12 @@ sites 双端点正常；冒烟数据已清理。
 
 ## 3. 环境现场快照（本轮会话结束）
 
-- **后端**：127.0.0.1:8000 在跑（v0.6.1 代码）；mock 飞书 8902、前端 5173 当前未跑
-  （验证时临时起过 vite，验证完已停）；
+- **后端**：127.0.0.1:8000 在跑；前端 5173 当前未跑（验证时临时起过，完已停）；
+  mock 门户脚本已删（v0.6.2），不再有 8901/8902；
 - **DB**：portal 6/8 现在带正确 hints（冒烟副产物，与真实契约一致）；binding 3/4/5
   数据保留但不再轮询；samples/recipes 历史未动；
-- **git**：初始提交 → v0.6.0（扩展快照链路）→ v0.6.1（侧边栏 + applied 移除），
-  均已推 origin/main，工作区干净（2026-09-02 v0.6.1 会话末）。
+- **git**：初始提交 → v0.6.0（扩展快照链路）→ v0.6.1（侧边栏 + applied 移除，已推）；
+  v0.6.2（mock 删除）已完成未提交，待用户确认后提交推送。
 
 ## 4. 剩余工作（旧代码清理，无功能风险，按序机械执行）
 
@@ -256,7 +426,7 @@ REFACTOR_PLAN §3 M3 删除清单照旧，但已无闸门前置：
 
 ```bash
 cd backend
-python -m pytest -q                    # 全量回归（当前基线 143 passed）
+python -m pytest -q                    # 全量回归（当前基线 177 passed）
 # 后端已在跑；手动重启：杀 8000 进程后 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 # 指标观测（事后）：管理员登录后 GET /api/admin/snapshots/stats
 # 管理员：admin@jobcheck.dev / Admin12345

@@ -53,14 +53,14 @@ def fake_adapter(monkeypatch):
 @pytest.fixture()
 def portal(db):
     row = Portal(
-        name="Mock 演示门户",
-        company="演示公司",
+        name="测试门户",
+        company="测试公司",
         provider_key="json_adapter",
-        domains=["localhost:8901"],
+        domains=["portal.example.com"],
         enabled=True,
         verified=True,
         config={
-            "login_url": "http://127.0.0.1:8901/",
+            "login_url": "https://portal.example.com/login",
             "session_cookie_names": ["mk_session"],
             "status_map": [{"pattern": "简历评估", "status": "screening"}],
         },
@@ -82,13 +82,13 @@ def test_binding_full_flow(auth_client, db, portal, fake_adapter):
     resp = auth_client.post("/api/bindings", json={"portal_id": portal.id})
     assert resp.status_code == 201, resp.text
     token = resp.json()["token"]
-    assert resp.json()["login_url"] == "http://127.0.0.1:8901/"
+    assert resp.json()["login_url"] == "https://portal.example.com/login"
     binding_id = resp.json()["id"]
 
     # 2. 插件回传 Cookie 激活（无用户会话，凭 token）
     resp = auth_client.post(
         "/api/bindings/activate",
-        json={"token": token, "cookies": [{"name": "mk_session", "value": "abc", "domain": "127.0.0.1"}]},
+        json={"token": token, "cookies": [{"name": "mk_session", "value": "abc", "domain": "portal.example.com"}]},
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["synced"] is True
@@ -102,7 +102,7 @@ def test_binding_full_flow(auth_client, db, portal, fake_adapter):
     assert by_title["后端开发工程师"]["current_status"] == "screening"
     assert by_title["后端开发工程师"]["raw_status_text"] == "简历评估中"
     assert by_title["数据分析"]["current_status"] == "written_test"  # 通用兜底规则
-    assert by_title["后端开发工程师"]["company"] == "演示公司"
+    assert by_title["后端开发工程师"]["company"] == "测试公司"
 
     # 4. intent 轮询终态
     assert auth_client.get(f"/api/bindings/intents/{token}").json()["status"] == "activated"

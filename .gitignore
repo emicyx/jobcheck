@@ -8,3 +8,6 @@ jobcheck.db-shm
 venv/
 .venv/
 .zcode/
+
+# 真实站点测试数据不入库（2026-09-03 用户拍板）：私有 golden 本地留存
+backend/tests/golden_samples/private/

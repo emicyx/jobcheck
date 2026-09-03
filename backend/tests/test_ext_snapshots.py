@@ -17,7 +17,12 @@ GOLDEN = Path(__file__).parent / "golden_samples"
 
 
 def _golden(name: str) -> dict:
-    g = json.loads((GOLDEN / name).read_text(encoding="utf-8"))
+    # 真实站点测试数据不入库（用户拍板 2026-09-03）：私有 golden 放
+    # golden_samples/private/（gitignore），克隆环境缺失时跳过而非失败
+    path = next((p for p in (GOLDEN / name, GOLDEN / "private" / name) if p.exists()), None)
+    if path is None:
+        pytest.skip(f"私有 golden 未提供（真实站点数据不入库）: {name}")
+    g = json.loads(path.read_text(encoding="utf-8"))
     return g.get("snapshot") or g.get("sample")
 
 
@@ -138,6 +143,31 @@ def test_shadow_flag_still_supported(auth_client, db, monkeypatch):
     resp = auth_client.post("/api/ext/snapshots", json=_golden("moka_like.json"), headers=_bearer(token))
     assert resp.status_code == 201 and resp.json()["status"] == "parsed"
     assert db.scalars(select(Application)).first() is None
+
+
+def test_oppo_snapshot_full_chain(auth_client, db, monkeypatch):
+    """OPPO 校招全链路（2026-09-03 云端实盘异常回归）：状态在流程节点数组里，
+    平台规格命中 → 建门户（规格自带品牌名 OPPO，无租户内嵌/DOM title 可用）→
+    码表归一化落卡：进行中筛选 / 被拒 / Offer。"""
+    monkeypatch.setattr(settings, "snapshot_throttle_minutes", 0)
+    token = _pair(auth_client)
+    resp = auth_client.post("/api/ext/snapshots", json=_golden("oppo_progress_like.json"), headers=_bearer(token))
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["status"] == "parsed" and body["route"] == "platform"
+    assert body["parsed_count"] == 3
+
+    portal = db.get(Portal, body["portal"]["id"])
+    assert portal.name == "OPPO" and portal.company == "OPPO"
+    assert portal.config["hints"]["list_json_path"] == "data.*.deliveryPositionRecordList"
+
+    cards = {c.job_title: c for c in db.scalars(select(Application))}
+    assert len(cards) == 3
+    assert cards["AI算法工程师"].current_status == "screening"
+    assert cards["软件开发工程师（Android）"].current_status == "rejected"
+    assert cards["数据分析师"].current_status == "offer"
+    assert cards["AI算法工程师"].company == "OPPO"
+    assert cards["AI算法工程师"].work_location == "深圳市"
 
 
 def test_connected_sites_endpoints(auth_client, db, monkeypatch):

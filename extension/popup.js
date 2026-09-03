@@ -211,7 +211,7 @@ async function renderPairBox() {
       <p class="ok" style="margin:0">✓ 已配对</p>
       <p class="muted" style="margin:2px 0 0">${st.email || ""}${st.queue ? ` · 待上报 ${st.queue} 条` : ""}</p>
       ${last ? `<p class="muted" style="margin:2px 0 0">最近采集：${new Date(last.at).toLocaleTimeString()} ${last.ok ? "✓" : "（HTTP " + last.http + "）"}</p>` : ""}
-      <p class="muted" style="margin:2px 0 0">到招聘站「我的投递」页点「同步当前页」建立连接；已连接站点每小时自动刷新。</p>
+      <p class="muted" style="margin:2px 0 0">到招聘站「我的投递」页点「同步当前页」建立连接；已连接站点每 3 小时自动刷新。</p>
       ${st.pairError ? `<p class="err" style="margin:4px 0 0">${st.pairError}</p>` : ""}
       <button id="sync-now">同步当前页</button>
       <p class="muted" id="sync-result" style="margin:6px 0 0;display:none"></p>

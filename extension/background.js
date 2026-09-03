@@ -487,7 +487,7 @@ async function syncCurrentTab(tabId) {
 }
 
 // ── 后台自动同步（REFACTOR_PLAN M2，用户拍板「默认后台自动同步」）──────
-// 每小时 tick 从平台拉「已连接站点」清单，轮转回访一个站点：静默开隐藏 tab →
+// 每 3 小时 tick 从平台拉「已连接站点」清单，轮转回访一个站点：静默开隐藏 tab →
 // 等页面 settle（站点自己的 JS 带登录态拉数据）→ 直接采集上报 → 关 tab。
 // 每次只回访一个站点（串行错峰防风控）；storage 心跳防止 MV3 SW 等待期被杀。
 
@@ -505,7 +505,7 @@ async function autoSyncTick() {
     });
     if (resp.ok) sites = (await resp.json()).sites || [];
   } catch {
-    return; // 平台不可达：下个整点再试
+    return; // 平台不可达：下个周期再试
   }
   const usable = sites.filter((s) => /^https?:/i.test(s.url || ""));
   if (!usable.length) return;
@@ -695,9 +695,15 @@ async function flushQueue() {
 
 chrome.alarms.create("jc-flush", { periodInMinutes: 1 });
 // jc-autosync 守卫式创建：SW 每次唤醒都重跑顶层代码（jc-flush 每分钟唤醒一次），
-// 无条件 create 会把 60 分钟周期反复重置导致永不触发——0.5.1 的实盘 bug
+// 无条件 create 会把周期反复重置导致永不触发——0.5.1 的实盘 bug。
+// 周期不一致时重建一次：存量安装的 60min 闹钟跨浏览器重启持久存在，只改本处
+// 参数迁移不到——比对 periodInMinutes 差异才 create（同名覆盖重排），迁移后为空操作
+const AUTOSYNC_PERIOD_MIN = 180; // 每 3 小时（2026-09-03 由 1h 下调：控风控与解析成本）
 chrome.alarms.get("jc-autosync", (existing) => {
-  if (!existing) chrome.alarms.create("jc-autosync", { periodInMinutes: 60 });
+  // ?? PERIOD：周期字段缺失时视为匹配，宁可少迁移也不反复重建（0.5.1 事故教训）
+  if (!existing || Math.abs((existing.periodInMinutes ?? AUTOSYNC_PERIOD_MIN) - AUTOSYNC_PERIOD_MIN) > 1) {
+    chrome.alarms.create("jc-autosync", { periodInMinutes: AUTOSYNC_PERIOD_MIN });
+  }
 });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "jc-flush") flushQueue();
@@ -706,11 +712,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 flushQueue(); // SW 启动即冲刷积压
 autosyncKick(); // 浏览器重启后闹钟周期重排，启动时补跑欠下的那一轮
 
-// 启动补跑：距上次 tick ≥55min（一个周期内）才补，正常唤醒下是空操作
+// 启动补跑：距上次 tick ≥175min（一个周期内）才补，正常唤醒下是空操作
 async function autosyncKick() {
   try {
     const stored = (await chrome.storage.local.get(["jcLastAutosync"])) || {};
-    if (Date.now() - (stored.jcLastAutosync || 0) >= 55 * 60 * 1000) await autoSyncTick();
+    if (Date.now() - (stored.jcLastAutosync || 0) >= 175 * 60 * 1000) await autoSyncTick();
   } catch { /* ignore */ }
 }
 

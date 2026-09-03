@@ -14,11 +14,16 @@ def dig(data, path: str):
     携程 careers 把状态拆成 phaseInfoCN（阶段）+ statusInfoCN（进度）两个
     字段，单取任一都丢语义（「进行中」落待确认），拼接出「测评 进行中」
     才能命中通用状态规则。
+
+    段形如 ``key=value`` 时为列表过滤语义：当前节点是 dict 数组时选中首个
+    ``element[key] == value`` 的元素再继续下探。OPPO 校招把状态藏在流程节点
+    数组里（flowProcessTemplateList，flowProcessStatus=THE_ONGOING 为当前
+    节点），没有它就无法表达「取进行中的那个节点」。
     """
     if "+" in path:
         parts = []
         for sub in path.split("+"):
-            value = dig(data, sub)
+            value = dig(data, sub.strip())
             if value is None or isinstance(value, (dict, list)):
                 continue
             text = str(value).strip()
@@ -32,10 +37,17 @@ def dig(data, path: str):
         if isinstance(node, dict):
             node = node.get(part)
         elif isinstance(node, list):
-            try:
-                node = node[int(part)]
-            except (ValueError, IndexError):
-                return None
+            if "=" in part:
+                key, _, expected = part.partition("=")
+                node = next(
+                    (x for x in node if isinstance(x, dict) and str(x.get(key)) == expected),
+                    None,
+                )
+            else:
+                try:
+                    node = node[int(part)]
+                except (ValueError, IndexError):
+                    return None
         else:
             return None
     return node

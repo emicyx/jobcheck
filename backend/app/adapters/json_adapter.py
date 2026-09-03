@@ -52,7 +52,7 @@ class JSONAPIAdapter(BaseAdapter):
         if required and not all(name in ctx.cookies for name in required):
             raise SessionInvalidError("会话 Cookie 缺失")
 
-        # trust_env=False：绕过系统代理直连（本地 Mock 与国内官网均无需代理）；
+        # trust_env=False：绕过系统代理直连（国内招聘官网无需代理）；
         # list_headers 的 ${cookie:NAME} 引用在 httpio.resolve_headers 里派生
         cookies = dict(ctx.cookies)
         resp = self._send(config, method, url, cookies)

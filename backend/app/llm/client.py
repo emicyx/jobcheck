@@ -71,10 +71,14 @@ def call_json(
     price_out: float,
     sample_id: int | None = None,
     attempt: int = 1,
+    timeout: float = _TIMEOUT,
+    retries: int = _RETRIES,
 ) -> dict:
     """调用 OpenAI 兼容 /chat/completions，强制 JSON 输出，返回解析后的 dict。
 
-    失败重试 3 次（指数退避）；每次尝试（含失败）都记账。
+    失败重试（指数退避）；每次尝试（含失败）都记账。timeout/retries 可按任务
+    覆写：处在请求路径里的任务（如 dom_parse 在快照上报的 HTTP 请求内）必须
+    收紧——默认 60s×3 次的最坏 ~3min 会拖死调用方（扩展上报只等 30s）。
     """
     if not api_key:
         raise LLMError(f"{task}: 未配置 API key（provider=openai_compatible 需要）")
@@ -94,7 +98,7 @@ def call_json(
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
     last_error: Exception | None = None
-    for retry in range(_RETRIES):
+    for retry in range(retries):
         started = time.monotonic()
         try:
             # trust_env=False：直连，不经系统代理
@@ -124,9 +128,9 @@ def call_json(
                 tokens_in=0, tokens_out=0, cost=0.0,
                 latency_ms=int((time.monotonic() - started) * 1000), ok=False, error=str(e),
             )
-            if retry < _RETRIES - 1:
+            if retry < retries - 1:
                 time.sleep(2**retry)
-    raise LLMError(f"{task}: 调用失败（已重试 {_RETRIES} 次）: {last_error}")
+    raise LLMError(f"{task}: 调用失败（已重试 {retries} 次）: {last_error}")
 
 
 def _parse_json(content: str) -> dict:

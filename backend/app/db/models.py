@@ -275,7 +275,7 @@ class Snapshot(Base):
     login_suspect: Mapped[bool] = mapped_column(Boolean, default=False)  # 扩展判定疑似未登录
 
     parse_status: Mapped[str] = mapped_column(String(16), default="pending", index=True)  # pending | parsed | no_data
-    parse_route: Mapped[str | None] = mapped_column(String(16), nullable=True)  # hints | platform | heuristics | embedded
+    parse_route: Mapped[str | None] = mapped_column(String(16), nullable=True)  # platform | hints | heuristics | embedded | dom | llm_dom
     parse_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     parsed_count: Mapped[int] = mapped_column(default=0)
     list_json_path: Mapped[str | None] = mapped_column(String(255), nullable=True)  # 解析命中定位（ hints 落档依据）

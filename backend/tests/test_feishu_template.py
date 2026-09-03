@@ -1,50 +1,47 @@
 """飞书招聘平台模板测试：形状识别 → 模板实例化发布 → 运行时提取，外加防误报。
 
-采样数据直接取自 scripts/mock_feishu_portal 的接口返回（TestClient 拉取），
-而 Mock 按 2026-09-01 对真实站点的登录态实测契约 1:1 复刻
-（delivery_list / job_post_info.title / operation_list 状态时间线），
-保证「真实契约 ⇄ Mock ⇄ 指纹模板 ⇄ 实例化 ⇄ 运行时重放」五者一致。
+采样数据取自 golden_samples/feishu_like.json —— 按 2026-09-01 对真实站点
+（hf7l9aiqzx.jobs.feishu.cn）登录态实测契约 1:1 复刻固化的样本（原
+scripts/mock_feishu_portal.py 已删除，产品面不再有 mock 门户）。
+真实契约要点：POST /api/v1/csrf/token 匿名种 atsx-csrf-token Cookie（7 天）；
+POST /api/v1/search/user/applications 需 x-csrf-token（= Cookie 值）与
+website-path 头；列表项 delivery_list[] 含 job_post_info.title /
+biz_create_time（字符串毫秒）/ operation_list[]（末项 operation_code 即状态），
+保证「真实契约 ⇄ golden ⇄ 指纹模板 ⇄ 实例化 ⇄ 运行时重放」五者一致。
 """
 
 import json
+from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.adapters import AdapterContext
 from app.adapters.json_adapter import JSONAPIAdapter
 from app.db.models import Portal, Recipe, Sample
 from app.llm import fingerprint
-from scripts.mock_feishu_portal import app as feishu_app
-from scripts.mock_feishu_portal import WEBSITE_PATH
 
 HOST = "127.0.0.1:8902"
+WEBSITE_PATH = "704852"  # 真实站点的 website-path 头值（站点路径首段）
 PAGE_URL = f"http://{HOST}/{WEBSITE_PATH}/position/application"
 LIST_URL = f"http://{HOST}/api/v1/search/user/applications"
+
+_GOLDEN = Path(__file__).parent / "golden_samples" / "private" / "feishu_like.json"
 
 
 def _feishu_network() -> list[dict]:
     """模拟插件主动探测在真实站上拿到的请求-响应对（POST + 分页体）。"""
-    with TestClient(feishu_app) as client:
-        client.post("/do-login")
-        token = client.post("/api/v1/csrf/token").json()["data"]["token"]
-        resp = client.post(
-            "/api/v1/search/user/applications",
-            headers={
-                "x-csrf-token": token,
-                "website-path": WEBSITE_PATH,
-                "X-Requested-With": "XMLHttpRequest",
-            },
-        )
-        assert resp.status_code == 200, resp.text
-        body = resp.text
+    # 真实站点形状数据不入库（用户拍板 2026-09-03）：golden 在
+    # golden_samples/private/（gitignore），克隆环境缺失时跳过而非失败
+    if not _GOLDEN.exists():
+        pytest.skip("私有 golden 未提供（真实站点数据不入库）: feishu_like.json")
+    golden = json.loads(_GOLDEN.read_text(encoding="utf-8"))
     return [{
         "url": LIST_URL,
         "method": "POST",
         "params": {},
         "request_body": json.dumps({"page_no": 1, "page_size": 20}),
-        "response_body": body,
+        "response_body": json.dumps(golden),
     }]
 
 
@@ -80,8 +77,6 @@ def test_fingerprint_matches_feishu_shape():
 
 def test_fingerprint_no_false_positive_on_other_shapes():
     # 腾讯形状（自研）：不得误认成飞书
-    from pathlib import Path
-
     golden = json.loads((Path(__file__).parent / "golden_samples" / "tencent_like.json").read_text(encoding="utf-8"))
     hits = [t.key for t in fingerprint._TEMPLATES if fingerprint.match(golden["sample"]["network"])]
     assert hits == []

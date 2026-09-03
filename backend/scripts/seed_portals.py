@@ -1,40 +1,10 @@
-"""门户种子：Mock 演示门户 + 小米(Moka，待抓包验证)。
+"""门户种子（真实站点）：小米(Moka，待抓包验证) + 腾讯(已校准) + 网易/携程/去哪儿(待采样)。
 
 运行：python -m scripts.seed_portals
 """
 
 from app.db.database import Base, SessionLocal, engine
 from app.db.models import Portal
-
-MOCK_PORTAL = dict(
-    name="Mock 演示门户",
-    company="演示公司",
-    provider_key="json_adapter",
-    domains=["localhost:8901", "127.0.0.1:8901"],
-    enabled=True,
-    verified=True,
-    note="本地演示用：python -m scripts.mock_portal 启动后可用",
-    config={
-        "login_url": "http://127.0.0.1:8901/",
-        "session_cookie_names": ["mk_session"],
-        "list_url": "http://127.0.0.1:8901/api/candidate/applications",
-        "list_method": "GET",
-        "list_json_path": "data.list",
-        "fields": {
-            "id": "id",
-            "job_title": "positionName",
-            "status_raw": "statusText",
-            "department": "departmentName",
-            "applied_at": "deliverTime",
-        },
-        "session_invalid_markers": ["SESSION_INVALID"],
-        "status_map": [
-            {"pattern": "简历评估", "status": "screening"},
-            {"pattern": "笔试", "status": "written_test"},
-            {"pattern": "已终止", "status": "rejected"},
-        ],
-    },
-)
 
 # 真实 Moka 候选人端接口路径需登录后抓包确认，验证前保持 disabled。
 XIAOMI_PORTAL = dict(
@@ -121,11 +91,10 @@ PENDING_PORTALS = [
              "https://job.ctrip.com/", "自研系统；待采样生成配置（投递页：登录后「申请记录」）"),
     _pending("去哪儿校招", "去哪儿", ["campus.qunar.com", "jobs.feishu.cn"],
              "https://campus.qunar.com/",
-             "飞书招聘；已内置飞书平台模板（结构指纹），采样后自动实例化接入——"
-             "本地可先用 Mock 飞书门户验证（python -m scripts.mock_feishu_portal，127.0.0.1:8902）"),
+             "飞书招聘；已内置飞书平台模板（结构指纹），真实站采样后自动实例化接入"),
 ]
 
-SEEDS = [MOCK_PORTAL, XIAOMI_PORTAL, TENCENT_PORTAL, *PENDING_PORTALS]
+SEEDS = [XIAOMI_PORTAL, TENCENT_PORTAL, *PENDING_PORTALS]
 
 
 def main() -> None:

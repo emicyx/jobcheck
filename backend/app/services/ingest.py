@@ -3,9 +3,15 @@
 
 解析顺序：已知平台规格（真实采样校准过的 list_json_path/field_map）→
 portal hints（同域上次成功定位，失效自动重推）→ 确定性启发式全量扫描
-（复用 llm/heuristics，含 SSR 内嵌块）。多条可解析候选按 URL 投递特征
-排序选优——职位列表/筛选项等「长得像列表」的载荷不得冒充投递记录
-（M0 盘点 #27：GetJobAdPageList 与 GetAllDeliveryRecord 双双可解析）。
+（复用 llm/heuristics，含 SSR 内嵌块）→ DOM 层（规则先跑 + 可信度分门控：
+高分采信规则，失败/低分由 LLM 接管，LLM 不可用时规则结果降级兜底）。
+多条可解析候选按 URL 投递特征排序选优——职位列表/筛选项等「长得像列表」
+的载荷不得冒充投递记录（M0 盘点 #27：GetJobAdPageList 与
+GetAllDeliveryRecord 双双可解析）。
+
+DOM 规则层已冻结（2026-09-03 决策）：不再为新站人工补词典/正则——
+新站非模板版式由 LLM 负责，规则只在多行同构 + 日期 + 正常标题的形态上出手。
+dom/llm_dom 路由落卡带状态护栏（逆跳/解析退化不覆盖已知状态，见 sync.ingest_applications）。
 
 影子模式（snapshot_shadow_mode=True）只解析记录结果，不创建卡片；
 转正时复用 sync.ingest_applications（与旧轮询同一份 diff/建卡/历史代码）。
@@ -59,6 +65,8 @@ class PlatformParseSpec:
     # 已实证的状态码映射（写入新建门户 config.status_map 供归一化使用；
     # 未验证的码不映射，落「待确认」由运行期沉淀——宁缺毋错）
     status_map: tuple[tuple[str, str], ...] = ()
+    # 规格自带的品牌名（响应无租户名、DOM 无 title 时的门户命名兜底）
+    brand: str | None = None
 
 
 PLATFORM_SPECS: list[PlatformParseSpec] = [
@@ -141,6 +149,45 @@ PLATFORM_SPECS: list[PlatformParseSpec] = [
             ("applied_at", "deliverTime"),
         ),
     ),
+    PlatformParseSpec(
+        # OPPO 校招（careers.oppo.com/university/.../center/history）：2026-09-03 按
+        # 官网前端 bundle 逆向校准（无真实账号采样）。GET /api/delivery/
+        # queryAllDeliveryProgressList → data[].deliveryPositionRecordList[]，投递
+        # 条目上没有平铺状态字段——状态在 flowProcessTemplateList 流程节点数组里
+        # （flowProcessStatus：PASS 已过 / THE_ONGOING 当前 / NOT_PASS 被拒 /
+        # DID_NOT_ARRIVE 未到），页面状态文案由前端计算。status_raw 拼接链：
+        # 被拒标记 > 当前节点码 > 末节点码（全 PASS 即流程走完），靠 status_map
+        # 先到先得拼出终语义。?type=old 旧接口（deliveryDynamicsList）与社招接口
+        # （ats-candidate-api，publishName/firstAcceptNode 平铺）形状不同，未实证不猜。
+        key="oppo",
+        url_signals=(
+            (re.compile(r"([a-z0-9-]+\.)*careers\.oppo\.com", re.I), 4),
+            (re.compile(r"/api/delivery/queryAllDelivery", re.I), 4),
+        ),
+        key_signals=("deliveryPositionRecordList", "flowProcessTemplateList", "acceptNodeDesc", "nodeStatusDesc"),
+        threshold=4,
+        list_json_path="data.*.deliveryPositionRecordList",
+        field_map=(
+            ("id", "idDeliveryRecord"),
+            ("job_title", "positionName"),
+            ("status_raw",
+             "flowProcessTemplateList.flowProcessStatus=NOT_PASS.flowProcessStatus"
+             "+flowProcessTemplateList.flowProcessStatus=THE_ONGOING.acceptNode"
+             "+flowProcessTemplateList.-1.acceptNode"),
+            ("work_location", "workCityList.0.workCityName"),
+        ),
+        # 节点码表（acceptNode，来自前端 S() 图标映射的节点枚举）；
+        # NOT_PASS 排最前：被拒时当前节点码仍会拼进来，必须压过阶段规则
+        status_map=(
+            ("NOT_PASS", "rejected"),
+            ("WRITTEN_EXAMINATION", "written_test"),
+            ("PRELIMINARY_SCREENING|RE_SCREENING|SCREENING|FIRST", "screening"),
+            ("AI_AUDITION|INTERVIEW", "interview_unknown"),
+            ("OFFER", "offer"),
+            ("ENTRY|INDUCTION", "onboarded"),
+        ),
+        brand="OPPO",
+    ),
 ]
 
 # ── 候选排序信号：投递列表 vs 职位/筛选项列表的 URL 特征 ──────────────
@@ -159,11 +206,16 @@ _NUMERIC_STATUS_RE = re.compile(r"^[\d.\s-]+$")
 # 投递记录不带「发布/开关职位」类键；#decrypted 载荷没有 URL 负特征可用，只能靠键判。
 # 虹科快照 #22 追加北森 GetJobAdPageList 家族：招聘人数/发布与截止时间/收藏与
 # 已投标记/投递上限/JD 三件套——投递记录携带申请状态与申请时间，不会带发布侧属性。
+# 联想快照 #39 追加 JD 详情单对象家族：jobName+status+workPlace 恰好覆盖投递键型
+# （status 是数字标记、workPlace 是地点 ID），唯有 JD 正文键能揭穿——职责/要求/
+# 学历要求/热门标记，投递记录永远不会携带职位的任职说明。
 _JOB_AD_KEY_RE = re.compile(
     r"^(published_?at|opened_?at|closed_?at|point_?to|recommendation_?bonus"
     r"|job_?count|department_?type|hire_?mode|mj_?code"
     r"|head_?count|post_?date(int)?|end_?time(int)?|favorites_?status"
-    r"|is_?collect(ed)?|is_?delivered|submission_?limit|salary|duty|require|welfare)$"
+    r"|is_?collect(ed)?|is_?delivered|submission_?limit|salary|duty|require|welfare"
+    r"|job_?dut(y|ies)|job_?requirement(s)?|(education|degree)_?required"
+    r"|job_?desc(ription)?|responsibilit(y|ies)|qualification(s)?|hot_?flag)$"
 )
 
 
@@ -183,6 +235,7 @@ class ParsedPayload:
     route: str  # platform | heuristics | embedded
     score: float
     status_map: list[dict] | None = None  # 平台规格自带的状态码映射（建新门户时落 config）
+    brand: str | None = None  # 平台规格自带的品牌名（门户命名兜底）
 
 
 def _valid_records(records) -> list:
@@ -255,6 +308,7 @@ def _platform_candidates(network: list[dict]) -> list[ParsedPayload]:
                     route="platform",
                     score=_candidate_score(url, fmap, records, platform=True),
                     status_map=[{"pattern": p, "status": s} for p, s in spec.status_map] or None,
+                    brand=spec.brand,
                 )
             )
     return out
@@ -277,6 +331,13 @@ def _heuristics_candidates(network: list[dict]) -> list[ParsedPayload]:
             continue
         records = _valid_records(records_from_items({k: FieldMapping(json_path=v) for k, v in fmap.items()}, items))
         if not records:
+            continue
+        # 语义锚点门槛（联想快照 #39 实盘）：既无 applied_at 字段、状态又全是
+        # 数字码的候选没有任何可校验锚（日期/文字状态皆缺），键名猜测的正确性
+        # 无从检验——JD 详情的 jobName+status+workPlace 恰好能凑出这套键型。
+        # 真投递接口要么带投递时间要么带文字状态；此形态让位给 DOM 层
+        # （渲染后的页面信息远比数字码载荷完整）。platform 路线有实证码表，不受此限。
+        if "applied_at" not in fmap and all(_NUMERIC_STATUS_RE.match(r.status_raw or "") for r in records):
             continue
         out.append(
             ParsedPayload(
@@ -444,6 +505,24 @@ def dom_records(html_text: str) -> list[ExtractedRecord]:
     )[0]
 
 
+# ── 规则 DOM 结果的可信度分（2026-09-03 决策：规则层冻结，此分裁决是否请 LLM）──
+# 回答「规则解析成功但数据可疑」的判定问题：历史事故形态（炎魂导航/页脚、
+# bilibili 横幅）共同特征是——行数少（单行组误报率最高）、整组无日期、
+# 标题长度出岗位名区间。三项加权 0..1：高分（≥0.5）直接采信规则（免费、
+# 毫秒、跨快照确定），低分交给 LLM 接管；LLM 不可用时低分结果仍作降级兜底。
+_DOM_RULES_TRUST_MIN = 0.5
+
+
+def dom_plausibility(records: list[ExtractedRecord]) -> float:
+    if not records:
+        return 0.0
+    n = len(records)
+    rows = 0.45 if n >= 2 else 0.10  # 多行同构组是真实列表的强信号；单卡是历史事故高发形态
+    date_cov = sum(1 for r in records if r.applied_at) / n  # 真实记录行几乎总带投递日期
+    title_ok = sum(1 for r in records if 4 <= len(r.job_title or "") <= 60) / n
+    return min(rows + 0.4 * date_cov + 0.15 * title_ok, 1.0)
+
+
 # ── Portal 定位 / upsert / hints ────────────────────────────────
 
 # 多租户 ATS：所有客户共用一个 host（Moka 全在 app.mokahr.com），门户必须按
@@ -471,12 +550,16 @@ def site_key(url: str) -> str:
 
 _BRAND_SUFFIX_RE = re.compile(r"(校园招聘|社会招聘|校招|招聘|校园|官网|官方网站|求职)$")
 
+# 个人中心页的通用标题不是品牌名（联想实盘：页面 <title> 我的申请 成了门户名
+# 与卡片 company）——命中即放弃 title 兜底，退回 host 命名
+_GENERIC_TITLE_RE = re.compile(r"^我的(申请|投递|简历|收藏|职位|测评|offer)|个人中心$")
+
 
 def brand_from_dom(dom: str | None) -> str | None:
     """从裁剪 DOM 的 <title> 提取品牌名（「炎魂网络 - 校园招聘」→ 炎魂网络）。
 
     扩展裁剪只保留 id/class/href/type/title 属性，meta 多半已被剥掉，title 是
-    最稳定信号；已剔除备案/版权等噪声标题。
+    最稳定信号；已剔除备案/版权等噪声标题与个人中心通用标题。
     """
     if not dom:
         return None
@@ -487,7 +570,7 @@ def brand_from_dom(dom: str | None) -> str | None:
     except Exception:
         return None
     title = " ".join(" ".join(root.xpath("//title/text()")).split())
-    if not title or _NOISE_TITLE_RE.search(title):
+    if not title or _NOISE_TITLE_RE.search(title) or _GENERIC_TITLE_RE.match(title):
         return None
     brand = title
     for sep in (" - ", " – ", " — ", "_", "|", "·", ":", "："):
@@ -562,12 +645,16 @@ def hints_from_portal(portal: Portal) -> dict | None:
 
 
 def _apply_hints(hints: dict, network: list[dict]) -> ParsedPayload | None:
-    """按上次成功定位重放解析；条目缺失/提取失败自动作废（返回 None 走全量扫描）。"""
+    """按上次成功定位重放解析；条目缺失/提取失败/形态识破自动作废（返回 None 走全量扫描）。"""
     for entry, data in _iter_json_entries(network or []):
         if str(entry.get("url") or "") != hints.get("url"):
             continue
         items = dig_list(data, str(hints["list_json_path"]))
         if not items:
+            return None
+        # 上次定位的载荷如今被识破为职位广告形状（联想快照 #39：旧版引擎把 JD
+        # 详情钉进了 hints，错误会借重放永久固化）——作废，全量扫描重新选路
+        if _looks_like_job_ads(items):
             return None
         fmap = {str(k): str(v) for k, v in (hints.get("field_map") or {}).items()}
         if not fmap.get("job_title") or not fmap.get("status_raw"):
@@ -605,7 +692,7 @@ def upsert_portal_from_snapshot(
     }
     if portal is None:
         domain = registrable_domain(host)
-        brand = extract_brand_name(network) or brand_from_dom(dom)
+        brand = extract_brand_name(network) or brand_from_dom(dom) or payload.brand
         key = site_key(url)
         config = {"hints": hints}
         if key and key != host:
@@ -627,6 +714,10 @@ def upsert_portal_from_snapshot(
     else:
         config = dict(portal.config or {})
         config["hints"] = hints
+        # 实证 status_map 补写：旧门户可能是规格缺位时经 dom/heuristics 建的，
+        # 没有（或残缺的）码表——规格命中后回填，让存量门户下次同步即自愈
+        if payload.status_map:
+            config["status_map"] = payload.status_map
         portal.config = config
     db.flush()
     return portal
@@ -686,9 +777,16 @@ def ingest_snapshot(db: Session, snapshot: Snapshot, *, skip_hints: bool = False
             payload = _apply_hints(hints, snapshot.network or [])
     if payload is None:
         payload = parse_snapshot_network(snapshot.network)
+    # DOM 层（网络三层全落空）：规则先跑（免费毫秒级），可信度分裁决去向——
+    # 高分直接采信；失败/低分交给 LLM 接管；LLM 不可用时规则结果仍作降级兜底。
+    # 规则层冻结（2026-09-03 决策）：不再为新站人工补词典/正则，解不了的版式
+    # 由 LLM 负责；规则只在它确实擅长的形态（多行同构 + 日期 + 正常标题）上出手
+    llm_suggestions: list[tuple[str, str, float]] | None = None
+    dom_note = ""
     if payload is None and snapshot.dom:
         recs = dom_records(snapshot.dom)
-        if recs:
+        trust = dom_plausibility(recs)
+        if recs and trust >= _DOM_RULES_TRUST_MIN:
             payload = ParsedPayload(
                 entry_url=snapshot.url + "#dom",
                 list_json_path="dom",
@@ -697,6 +795,32 @@ def ingest_snapshot(db: Session, snapshot: Snapshot, *, skip_hints: bool = False
                 route="dom",
                 score=0.0,
             )
+        else:
+            from app.llm.dom_parse import parse_dom_snapshot
+
+            llm_res = parse_dom_snapshot(db, snapshot.dom, snapshot.url)
+            if llm_res is not None and llm_res.records:
+                payload = ParsedPayload(
+                    entry_url=snapshot.url + "#llm-dom",
+                    list_json_path="llm-dom",
+                    field_map={},
+                    records=llm_res.records,
+                    route="llm_dom",
+                    score=0.0,
+                )
+                llm_suggestions = llm_res.suggestions
+                if recs:
+                    dom_note = f"规则可信度 {trust:.2f} < {_DOM_RULES_TRUST_MIN:.2f}，LLM 接管"
+            elif recs:
+                payload = ParsedPayload(
+                    entry_url=snapshot.url + "#dom",
+                    list_json_path="dom",
+                    field_map={},
+                    records=recs,
+                    route="dom",
+                    score=0.0,
+                )
+                dom_note = f"规则可信度 {trust:.2f}，LLM 不可用降级采信"
     if payload is None:
         snapshot.parse_status = "no_data"
         snapshot.parse_route = None
@@ -715,14 +839,31 @@ def ingest_snapshot(db: Session, snapshot: Snapshot, *, skip_hints: bool = False
     snapshot.parsed_count = len(payload.records)
 
     note = f"{route} 命中 {payload.entry_url}（{payload.list_json_path}），提取 {len(payload.records)} 条"
+    if dom_note:
+        note += f"；{dom_note}"
+    if llm_suggestions:
+        # LLM 学到的状态语义沉淀为门户规则：英文文案/生僻状态原文下次同步
+        # 直接确定性命中，不再调 LLM（复用 T2 沉淀机制）
+        from app.llm.dom_parse import deposit_suggestions
+
+        deposited = deposit_suggestions(db, portal, llm_suggestions)
+        if deposited:
+            note += f"；沉淀状态规则 {deposited} 条"
     summary: dict = {}
     if not settings.snapshot_shadow_mode:
         from app.services.sync import ingest_applications
 
+        # dom/llm_dom 路由的提取可信度低于网络层：状态逆跳/解析退化不覆盖已知状态
         summary = ingest_applications(
-            db, user=snapshot.user, portal=portal, raw_list=_to_raw_applications(payload)
+            db,
+            user=snapshot.user,
+            portal=portal,
+            raw_list=_to_raw_applications(payload),
+            suspect_guard=route in ("dom", "llm_dom"),
         )
         note += f"；落卡 created={summary.get('created', 0)} updated={summary.get('updated', 0)}"
+        if summary.get("guarded"):
+            note += f"；拦截可疑状态变更 {summary['guarded']} 条"
     if snapshot.login_suspect:
         note += "；扩展上报疑似未登录"
     snapshot.parse_note = note

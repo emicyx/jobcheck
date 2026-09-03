@@ -16,7 +16,7 @@ const router = useRouter()
 const board = useBoardStore()
 const auth = useAuthStore()
 
-// ── 扩展同步（新链路：手动快照建档 + 每小时后台自动同步）──
+// ── 扩展同步（新链路：手动快照建档 + 每 3 小时后台自动同步）──
 const pairCode = ref<string | null>(null)
 const pairExpiresAt = ref<string | null>(null)
 const pairing = ref(false)
@@ -211,7 +211,7 @@ async function deleteAccount() {
         <h2>扩展同步 <n-tag size="small" round type="success" :bordered="false">推荐</n-tag></h2>
         <p class="hint">
           安装浏览器扩展并配对一次，之后到任意公司招聘站的「我的投递」页点插件「同步当前页」，投递记录即同步进看板并建立该站连接；
-          已连接站点插件每小时静默刷新一次。Cookie 始终留在浏览器里。
+          已连接站点插件每 3 小时静默刷新一次。Cookie 始终留在浏览器里。
         </p>
 
         <div class="pair-area">

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "JobCheck 登录态捕获助手",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "手动快照同步投递记录 + 已连接站点定时刷新 + 登录态绑定/采样。只读，Cookie 永不离开浏览器。",
   "action": {
     "default_title": "JobCheck",

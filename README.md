@@ -22,7 +22,7 @@ backend/
                    #        client(记账+熔断)/providers/pipeline/classify + prompts/
     services/      # 投递逻辑 / 绑定生命周期 / 同步 diff
     scheduler.py   # APScheduler 轮询（门户级限速+指数退避）
-  scripts/         # make_invite / seed_portals / mock_portal(本地演示门户)
+  scripts/         # make_invite / seed_portals（真实门户种子）
   tests/           # pytest（143 例）+ golden_samples/
 frontend/
   src/
@@ -40,20 +40,8 @@ LLM_DESIGN.md      # LLM 子系统实现规格（M4 自动配方管线）
 
 流程：看板「接入追踪」→ 粘贴/选择门户 → 装插件（`extension/` 目录，开发者模式加载）→ 点「去登录」在官网正常登录 → 插件自动捕获 Cookie 回传 → 首次同步自动建卡 → 之后每 6 小时自动轮询；状态变化自动写时间线，登录态失效看板黄条提醒，可一键重登。
 
-本地全链路演示（不需要任何真实公司账号）：
-
-```bash
-# 终端 1：后端（8000）
-cd backend && python -m uvicorn app.main:app --port 8000
-# 终端 2：Mock 门户（8901，模拟一个招聘官网）
-cd backend && python -m scripts.mock_portal
-# 终端 3：前端（5173）
-cd frontend && npm run dev
-```
-
-在「接入追踪」里选择「Mock 演示门户」→ 按引导完成绑定；随后可用
-`curl -X POST "http://127.0.0.1:8901/__set_status?job_id=1002&status=面试安排中"`
-改门户状态，回看板点「立即同步」观察状态变化与时间线。
+服务启动见下方「快速开始」（后端 8000 + 前端 5173，`start_dev.bat` 可一键拉起）；
+自动追踪面向真实招聘站，无需任何本地模拟站点。
 
 > 真实门户（小米/Moka 等）的接口配置需用真实账号登录后抓包填入
 > `portals.config` 后启用（见 `scripts/seed_portals.py` 中小米示例，当前为 disabled 待验证）。
@@ -66,20 +54,9 @@ cd frontend && npm run dev
 识别依据：飞书域名 + 接口路径形状 + 数据字段名（`application_list`/`job_title` 等蛇形命名），
 字段映射在真实采样数据上推断并被回放验证——模板认错或网站改版都会被考试拦下，不会给错数据。
 
-本地全流程演示（模拟"接入一个用飞书的新公司"）：
-
-```bash
-# 终端 4：Mock 飞书门户（8902，模拟一个飞书招聘形状的官网）
-cd backend && python -m scripts.mock_feishu_portal
-```
-
-浏览器访问 `http://127.0.0.1:8902` 点登录 → 进「我的投递」页（`/mine/apply`）→
-回平台向导粘贴 `http://127.0.0.1:8902/mine/apply` → 开始采样 → 插件采集 →
-管线指纹命中飞书模板自动发布 → 向导自动变为可绑定。改状态演示：
-`curl -X POST "http://127.0.0.1:8902/__set_status?application_id=8002&status=面试安排中"`。
-
-> 真实飞书站的求职者侧接口没有公开文档，模板的键名信号按飞书开放平台的实体命名构造；
-> 首个真实采样（如去哪儿）到位后校准，识别不了或验证不过会自动走 AI 生成路径，不影响使用。
+> 模板契约按真实站登录态实测校准（去哪儿/小米均已走通指纹命中 → 发布 → 绑定 → 拉取建卡）；
+> 回归测试用固化样本 `backend/tests/golden_samples/feishu_like.json`（按真实契约 1:1 复刻）。
+> 识别不了或验证不过会自动走 AI 生成路径，不影响使用。
 
 ### 未支持网站：自动配方管线（M4）
 
@@ -105,9 +82,24 @@ cd backend && python -m scripts.mock_feishu_portal
 
 **LLM 配置**：默认 `LLM_PROVIDER=heuristic`（离线确定性推断，零成本，适合本地演示与测试，同样必须过回放验证）。接入真实模型只需在 `backend/.env` 里切换为 `openai_compatible` 并填入 DeepSeek/GLM/Qwen 等任意 OpenAI 兼容接口的 base_url/model/api_key（换模型 = 改配置，不改代码）。用量与成本在 `/api/admin/llm-calls` 可查。
 
+**T3 · DOM 解析：规则可信度分门控 + LLM 接管**（快照链路，2026-09-03）：非模板
+招聘站的解析主路径。快照解析顺序为 平台规格 → 门户 hints → 确定性启发式 →
+**DOM 层（规则先跑 + 可信度分裁决）**：`dom_plausibility`（行数同构/日期覆盖/标题
+长度）≥0.5 直接采信规则（免费毫秒、跨快照确定）；失败或低分由 LLM 接管；LLM 不可用
+（未配置/超预算/上游故障）时规则结果仍作降级兜底。**DOM 规则层已冻结**：不再为新站
+人工补词典/正则——步骤条/时间线/图标 title/英文状态等非模板版式一律由 LLM 负责，
+裁剪 DOM 压成文本大纲（约 4× 压缩，`LLM_DOM_MAX_CHARS` 预算截断）后交给 `dom_parse`
+提示词提取。默认 `LLM_DOM_PROVIDER=heuristic`（层关闭零成本）；启用后每次调用经
+`llm_calls` 记账并受月预算熔断约束（20s 超时单次尝试，不拖慢上报），同一 DOM 结果
+LRU 缓存只调一次；输出过 Schema 校验 + 反幻觉词元回查（status_raw/job_title 必须
+能在页面大纲中找到，查不到整条丢弃，宁缺毋错）；高置信状态语义建议自动沉淀为门户级
+`StatusRule`（复用 T2 沉淀机制），下次同站点同步零成本确定性命中。dom/llm_dom 路由
+落卡带**状态护栏**：逆跳（offer→筛选）与解析退化（已知→待确认）不覆盖已知状态，
+parse_note 记录拦截计数。
+
 ### 真实站点全链路驱动页（后端侧测试用）
 
-对真实招聘站做全链路验收（不碰 Mock）时，可打开前端自带的
+对真实招聘站做全链路验收时，可打开前端自带的
 `http://localhost:5173/jc-e2e.html`：它与向导走**同一套 postMessage 契约**武装插件
 （采样 intent / 绑定 intent），其余环节全部由后端 API 驱动——登录 → 武装采样 →
 到目标站「我的投递」页点插件「采集当前页面」→ 轮询 `samples/mine` 看管线结果 →
