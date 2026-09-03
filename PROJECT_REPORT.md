@@ -1,6 +1,6 @@
 # JobCheck 项目报告 —— 背景 · 需求 · 实现 · 架构
 
-> 报告日期：2026-09-02 · 基于仓库当前状态（v0.6.1 已提交 `4edf39d`，v0.6.2 已完成待提交）
+> 报告日期：2026-09-02，增补至 2026-09-03 · 基于仓库当前状态（v0.6.3 已提交并推送 GitHub；本文主体撰写于 v0.6.1 期，v0.6.2/v0.6.3 变更见下方「增补」节）
 > 文中架构图/流程图/ER 图均为 Mermaid，可在 GitHub、VS Code（Mermaid 插件）、新版 PyCharm 的 Markdown 预览中直接渲染；
 > 或打开同目录 [PROJECT_REPORT.html](PROJECT_REPORT.html)，浏览器中即开即看（图表需联网加载 mermaid.js）。
 
@@ -15,8 +15,8 @@
 | 关键指标 | 数值 |
 |---|---|
 | 统一状态机 | **14** 个细分状态（`backend/app/domain/statuses.py`） |
-| 测试基线 | **143 passed**（18 个测试文件 + golden 样本回归） |
-| golden 回归样本 | **13** 个（覆盖飞书/北森/Moka/携程/腾讯 + 陷阱样本 + DOM 兜底） |
+| 测试基线 | **177 passed**（19 个测试文件 + golden 样本回归） |
+| golden 回归样本 | **12** 个公开（飞书/北森/Moka/携程/腾讯 + 陷阱 + DOM 兜底）+ 3 个本地私有（真实站点数据不入库，缺失即 skip） |
 | 数据表 | **13** 张 ORM 表 + `app_tags` 关联表（SQLite WAL） |
 | 解析引擎 | **4** 层优先级：平台规格 → portal hints → 启发式/embedded → DOM 兜底 |
 | 扩展采集钩子 | **4** 层：fetch / XHR / JSON.parse / Response.json（MAIN world 只读包装） |
@@ -24,6 +24,31 @@
 | 目标规模 | 境内轻量云 2C4G，≤50 用户，SQLite（保留迁 PostgreSQL 路径） |
 
 ---
+
+## 增补：v0.6.2 → v0.6.3（2026-09-03）
+
+> 以下变更晚于报告主体撰写；涉及解析引擎的章节（§4.3）以本节为准。
+
+- **v0.6.2 · 删除全部 mock 招聘门户**：平台只面向真实招聘站，飞书模板回归改用固化
+  golden 样本（现移入私有目录）；mock 脚本与 e2e 旧脚本删除；
+- **OPPO 校招平台规格**：投递条目无平铺状态字段——状态在 `flowProcessTemplateList`
+  流程节点数组（PASS/THE_ONGOING/NOT_PASS），status_raw 按拼接链（被拒标记 >
+  当前节点码 > 末节点码）+ status_map 先到先得拼出终语义；`dig` 路径新增
+  `key=value` 过滤段语义；
+- **v0.6.3 · T3 LLM DOM 解析层（本轮核心）**：非模板版式（步骤条/时间线/图标
+  title/英文状态）由 LLM 解析——裁剪 DOM 压成文本大纲（~4×）→ `dom_parse` v2
+  提示词 → Schema 校验 → 反幻觉词元回查（照抄内容须能在页面大纲回查到）；
+  高置信语义建议沉淀门户级 StatusRule（LLM 学到的映射变确定性零成本）；
+- **解析链路重构**：`dom_plausibility` 可信度分门控（行数同构/日期覆盖/标题长度，
+  ≥0.5 采信规则；低分/失败 LLM 接管；LLM 不可用降级兜底）——**DOM 规则层冻结**，
+  不再为新站人工补词典；`suspect_guard` 状态护栏（逆跳/解析退化不覆盖已知状态）；
+  LLM 调用 20s×1 次不拖慢上报；
+- **在线标定（glm-4-flash）**：冒烟与三真实站点验证通过；修复两个真实形态——
+  图标字符粘进状态照抄、图标符号本身被当状态（歧义在表示层消解：纯符号文本
+  元素以 title 属性作语义文本）；
+- **扩展 v0.6.1**：自动同步降频 1h → 3h（存量闹钟按 `periodInMinutes` 比对自动迁移）；
+- **纪律**：真实站点测试数据不入库（`golden_samples/private/`，gitignore，缺失即 skip）；
+- 已提交并推送 GitHub（`3e4ab17`），测试基线 143 → **177 passed**。
 
 ## 1. 项目背景
 

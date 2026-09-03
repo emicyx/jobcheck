@@ -1,42 +1,89 @@
 # JobCheck · 秋招投递统一追踪平台
 
-把分散在各公司官网的秋招投递进度，收进一张状态看板。当前为 **M1+M2+M4（管线已通）**：账号体系 + 手动/自动投递记录 + 状态看板（左侧「我的数据」个人统计侧边栏）+ 时间线 + 标签 + 门户绑定自动追踪 + **自动配方管线**（采样 → 指纹/LLM 生成 → 回放验证 → 免审批发布）。总体设计见 [DESIGN.md](DESIGN.md) 与 [LLM_DESIGN.md](LLM_DESIGN.md)。
+把分散在各公司官网的秋招投递进度，收进一张状态看板。**现行链路（2026-09-01 转正）：浏览器扩展快照式同步**——用户到招聘站「我的投递」页点插件「同步当前页」（或每 3 小时后台静默回访），扩展捕获网络原料与渲染 DOM 上报，后端现场解析（平台规格 → 门户 hints → 确定性启发式 → DOM 规则/LLM 可信度分门控）归一化到统一状态机落卡；**Cookie 永不离开浏览器**。账号体系 + 手动/自动投递记录 + 状态看板（左侧「我的数据」个人统计侧边栏）+ 时间线 + 标签齐备。现行方案见 [REFACTOR_PLAN.md](REFACTOR_PLAN.md)、现场状态见 [HANDOFF.md](HANDOFF.md)、历史设计见 [DESIGN.md](DESIGN.md) 与 [LLM_DESIGN.md](LLM_DESIGN.md)。
 
 ## 技术栈
 
 - **后端**：Python 3.12 / FastAPI / SQLAlchemy 2 / SQLite(WAL) / Argon2id / 签名 Cookie 会话 / lxml
 - **前端**：Vue 3 / Vite / TypeScript / Pinia / Naive UI（浅色定制主题）/ Chart.js（仅管理后台，懒加载）
-- **测试**：pytest（后端 143 例，含 golden 样本回归）
+- **测试**：pytest（后端 177 例，含 golden 样本回归；真实站点 golden 私有本地留存、不入库）
 
 ## 目录结构
 
 ```
 backend/
   app/
-    adapters/      # 适配器框架 + L1 JSON 适配器 + L2 配方执行器（共享 httpio/fields）
+    adapters/      # 适配器框架 + L1 JSON 适配器 + L2 配方执行器（共享 httpio/fields；旧轮询架构，待 M3 清理）
     api/           # 路由：auth / applications / tags / account / me / meta / portals / bindings / samples / admin / ext
     core/          # 配置、密码哈希、会话签名、Cookie AES-GCM 加密
     db/            # SQLAlchemy 模型与引擎（SQLite WAL + 外键）
     domain/        # 统一状态机 + 状态归一化（规则表+兜底）
-    llm/           # M4 配方管线：schemas/preprocess/validator/fingerprint/heuristics/
-                   #        client(记账+熔断)/providers/pipeline/classify + prompts/
-    services/      # 投递逻辑 / 绑定生命周期 / 同步 diff
-    scheduler.py   # APScheduler 轮询（门户级限速+指数退避）
-  scripts/         # make_invite / seed_portals（真实门户种子）
-  tests/           # pytest（143 例）+ golden_samples/
+    llm/           # classify(T2 状态兜底)/heuristics(快照启发式)/dom_parse(T3 LLM DOM 解析)
+                   # client(记账+熔断) + prompts/（含 dom_parse.md）
+    services/      # 投递逻辑 / 绑定生命周期 / 同步 diff / ingest(快照现场解析)
+    scheduler.py   # APScheduler 轮询（旧架构，已停用）
+  scripts/         # make_invite / seed_portals / smoke_llm_dom（T3 连通性冒烟）
+  tests/           # pytest（177 例）+ golden_samples/（+ private/ 本地私有不入库）
 frontend/
   src/
     api/           # fetch 封装与接口
     stores/        # pinia：auth / board
-    composables/   # useBindFlow（与插件协作的绑定交互流）
+    composables/   # useBindFlow（与插件协作的绑定交互流；旧链路，待 M3 清理）
     views/         # 登录 / 看板 / 设置 / 管理
     components/    # 我的数据侧边栏、分布条、卡片、表单弹窗、详情抽屉、接入向导
-extension/         # Chrome/Edge MV3 插件：登录态捕获 + fetch/XHR 采样（≥0.4，开发者模式加载）
-DESIGN.md          # 产品与技术设计（决策记录见 §12）
-LLM_DESIGN.md      # LLM 子系统实现规格（M4 自动配方管线）
+extension/         # Chrome/Edge MV3 插件：设备配对 + 快照采集上报 + 已连接站点定时回访（v0.6）
+README.md          # 本文件（现行链路与快速开始）
+REFACTOR_PLAN.md   # 快照式重构方案（现行架构的方案全文）
+HANDOFF.md         # 交接文档（现场状态 + 事故与决策记录，随每轮更新）
+DESIGN.md          # 历史设计（M1-M2 产品与技术设计）
+LLM_DESIGN.md      # 历史设计（M4 LLM 子系统规格）
+M0_BASELINE.md     # 历史基线盘点记录
+PROJECT_REPORT.md  # 项目报告（背景·需求·实现·架构，含 html 版）
 ```
 
-## 自动追踪（M2）
+## 现行链路详解：扩展快照式同步（v0.6）
+
+**用户旅程**：平台「设置 → 扩展同步」生成 6 位配对码（10 分钟有效）→ 插件 popup
+输入完成配对 → 到任意招聘站「我的投递」页点「**同步当前页**」→ 后端现场解析 →
+卡片自动出现、该站连接建立 → 之后插件每 3 小时静默回访已连接站点刷状态；
+某站显示「疑似未登录」时去该站重新登录一次即恢复。检测漏报时手动「同步当前页」兜底。
+
+**解析分层**（快照上报后按序尝试，任一层产出可信结果即止）：
+
+1. **平台规格**：真实采样校准过的已知平台（飞书/北森/Moka/携程/OPPO…）——确定性、免维护；
+2. **门户 hints**：同域上次成功定位的重放，失效自动作废重推；
+3. **确定性启发式**：网络 JSON 全量扫描定位「title+status 字典数组」（含 SSR 内嵌块），
+   职位广告/部门列表陷阱有专门否决（星环/虹科实盘回归）；
+4. **DOM 层**：规则版 `dom_records`（同签名重复兄弟行 + 状态词典）先跑，
+   `dom_plausibility` 可信度分（行数同构/日期覆盖/标题长度）≥0.5 直接采信；
+5. **T3 LLM DOM 解析**：规则失败/低分时接管非模板版式（详见下节）；LLM 不可用时
+   规则结果仍作降级兜底。dom/llm_dom 路由落卡带**状态护栏**（逆跳/解析退化
+   不覆盖已知状态），parse_note 记录裁决与拦截日志。
+
+**LLM 配置**：默认 `LLM_DOM_PROVIDER=heuristic`（层关闭，零成本）。接入真实模型只需在
+`backend/.env` 里切换为 `openai_compatible` 并填入任意 OpenAI 兼容接口的
+base_url/model/api_key（DeepSeek/GLM/Qwen 均可，换模型 = 改配置不改代码）。连通性
+验证：`cd backend && python -m scripts.smoke_llm_dom`（真实调用一次，约几厘钱）。
+用量与成本在 `/api/admin/llm-calls` 可查，月预算熔断与 T1/T2 共用。
+
+**T3 · DOM 解析：规则可信度分门控 + LLM 接管**（2026-09-03）：非模板
+招聘站的解析主路径。快照解析顺序为 平台规格 → 门户 hints → 确定性启发式 →
+**DOM 层（规则先跑 + 可信度分裁决）**：`dom_plausibility`（行数同构/日期覆盖/标题
+长度）≥0.5 直接采信规则（免费毫秒、跨快照确定）；失败或低分由 LLM 接管；LLM 不可用
+（未配置/超预算/上游故障）时规则结果仍作降级兜底。**DOM 规则层已冻结**：不再为新站
+人工补词典/正则——步骤条/时间线/图标 title/英文状态等非模板版式一律由 LLM 负责，
+裁剪 DOM 压成文本大纲（约 4× 压缩，`LLM_DOM_MAX_CHARS` 预算截断）后交给 `dom_parse`
+提示词提取。默认 `LLM_DOM_PROVIDER=heuristic`（层关闭零成本）；启用后每次调用经
+`llm_calls` 记账并受月预算熔断约束（20s 超时单次尝试，不拖慢上报），同一 DOM 结果
+LRU 缓存只调一次；输出过 Schema 校验 + 反幻觉词元回查（status_raw/job_title 必须
+能在页面大纲中找到，查不到整条丢弃，宁缺毋错）；高置信状态语义建议自动沉淀为门户级
+`StatusRule`（复用 T2 沉淀机制），下次同站点同步零成本确定性命中。dom/llm_dom 路由
+落卡带**状态护栏**：逆跳（offer→筛选）与解析退化（已知→待确认）不覆盖已知状态，
+parse_note 记录拦截计数。
+
+## 旧架构·自动追踪（M2：服务端 Cookie 轮询，2026-09-01 起停用，代码保留待 M3 清理）
+
+> 以下 M2/M4 两节为旧架构的历史描述；现行接入方式见上文「现行链路详解」，只需装插件 + 配对，无需向导绑定。
 
 流程：看板「接入追踪」→ 粘贴/选择门户 → 装插件（`extension/` 目录，开发者模式加载）→ 点「去登录」在官网正常登录 → 插件自动捕获 Cookie 回传 → 首次同步自动建卡 → 之后每 6 小时自动轮询；状态变化自动写时间线，登录态失效看板黄条提醒，可一键重登。
 
@@ -58,7 +105,7 @@ LLM_DESIGN.md      # LLM 子系统实现规格（M4 自动配方管线）
 > 回归测试用固化样本 `backend/tests/golden_samples/feishu_like.json`（按真实契约 1:1 复刻）。
 > 识别不了或验证不过会自动走 AI 生成路径，不影响使用。
 
-### 未支持网站：自动配方管线（M4）
+### 旧架构·自动配方管线（M4：采样→生成→轮询，随 M2 停用）
 
 向导里识别不到的网站（或显示"配置生成中"的门户），走采样流程：
 
@@ -80,24 +127,8 @@ LLM_DESIGN.md      # LLM 子系统实现规格（M4 自动配方管线）
 5. 治理：同注册域名去重复用、单门户 24h 冷却（含失败）、月预算熔断（超限暂停生成、T2 降级待确认，不影响已发布配方轮询）；
 6. 运行期沉淀：轮询遇到规则表未命中的状态原文 → T2 兜底分类一次并写回规则表（同一原文全平台只调一次）。
 
-**LLM 配置**：默认 `LLM_PROVIDER=heuristic`（离线确定性推断，零成本，适合本地演示与测试，同样必须过回放验证）。接入真实模型只需在 `backend/.env` 里切换为 `openai_compatible` 并填入 DeepSeek/GLM/Qwen 等任意 OpenAI 兼容接口的 base_url/model/api_key（换模型 = 改配置，不改代码）。用量与成本在 `/api/admin/llm-calls` 可查。
 
-**T3 · DOM 解析：规则可信度分门控 + LLM 接管**（快照链路，2026-09-03）：非模板
-招聘站的解析主路径。快照解析顺序为 平台规格 → 门户 hints → 确定性启发式 →
-**DOM 层（规则先跑 + 可信度分裁决）**：`dom_plausibility`（行数同构/日期覆盖/标题
-长度）≥0.5 直接采信规则（免费毫秒、跨快照确定）；失败或低分由 LLM 接管；LLM 不可用
-（未配置/超预算/上游故障）时规则结果仍作降级兜底。**DOM 规则层已冻结**：不再为新站
-人工补词典/正则——步骤条/时间线/图标 title/英文状态等非模板版式一律由 LLM 负责，
-裁剪 DOM 压成文本大纲（约 4× 压缩，`LLM_DOM_MAX_CHARS` 预算截断）后交给 `dom_parse`
-提示词提取。默认 `LLM_DOM_PROVIDER=heuristic`（层关闭零成本）；启用后每次调用经
-`llm_calls` 记账并受月预算熔断约束（20s 超时单次尝试，不拖慢上报），同一 DOM 结果
-LRU 缓存只调一次；输出过 Schema 校验 + 反幻觉词元回查（status_raw/job_title 必须
-能在页面大纲中找到，查不到整条丢弃，宁缺毋错）；高置信状态语义建议自动沉淀为门户级
-`StatusRule`（复用 T2 沉淀机制），下次同站点同步零成本确定性命中。dom/llm_dom 路由
-落卡带**状态护栏**：逆跳（offer→筛选）与解析退化（已知→待确认）不覆盖已知状态，
-parse_note 记录拦截计数。
-
-### 真实站点全链路驱动页（后端侧测试用）
+### 旧架构·真实站点全链路驱动页（采样/绑定验收，待 M3 按快照链路重写）
 
 对真实招聘站做全链路验收时，可打开前端自带的
 `http://localhost:5173/jc-e2e.html`：它与向导走**同一套 postMessage 契约**武装插件
@@ -156,5 +187,7 @@ python -m pytest -q
 - [x] **M1 手动版**：账号（邮箱+密码+邀请码）、投递 CRUD、状态看板、时间线、标签、注销级联
 - [x] **M2 自动化**：MV3 浏览器插件登录态捕获、门户绑定（Cookie AES-GCM 加密）、JSON 适配器 + 状态归一化、APScheduler 轮询（限速+退避）、失效检测与重登、接入向导与绑定管理 UI
 - [ ] **M3 上线**：境内部署 + 备案；~~管理后台界面~~（已完成：管理员登录后导航栏「管理」进入 `/admin`——概览趋势/快照链路健康度（含干跑重解析）/用户数据/投递数据/LLM 用量，纯只读监控）；~~飞书招聘适配器~~（已用平台模板方式实现，见上）
-- [x] **M4 自动配方管线（核心闭环）**：插件抓包升级（fetch/XHR 响应体）、两级模板匹配（域名 → 结构指纹，含飞书/Moka/北森模板）、T1 配方生成（OpenAI 兼容 + 离线 heuristic 提供者）、确定性回放验证（七断言 + 参数化检测）、免审批发布 + 治理（同域去重/24h 冷却/月预算熔断）、T2 状态兜底分类与规则表沉淀、golden 样本回归
-- [ ] **M4 余项**：真实 LLM 提供者线上标定（腾讯/网易/携程首批采样）、dom 型配方的 Playwright 运行时、用户手改状态沉淀映射候选（管理后台界面已完成，见 M3）
+- [x] **M4 自动配方管线（旧架构核心闭环，已随 M2 停用）**：插件抓包升级（fetch/XHR 响应体）、两级模板匹配（域名 → 结构指纹，含飞书/Moka/北森模板）、T1 配方生成（OpenAI 兼容 + 离线 heuristic 提供者）、确定性回放验证（七断言 + 参数化检测）、免审批发布 + 治理（同域去重/24h 冷却/月预算熔断）、T2 状态兜底分类与规则表沉淀、golden 样本回归
+- [x] **快照链路转正（2026-09-01，v0.5→v0.6）**：扩展访问时快照（网络原料 + 渲染 DOM）、设备配对（Bearer）、加密捕获三钩子（fetch/XHR 文本 + JSON.parse + Response.json）、DOM 规则兜底、hints 落档、多租户门户隔离（Moka 租户段）、删卡自愈回放
+- [x] **T3 LLM DOM 解析层（2026-09-03，v0.6.3）**：规则可信度分门控（高分采信 / 低分 LLM 接管 / 不可用降级兜底）、dom_parse v2 提示词 + 反幻觉词元回查、语义建议沉淀 StatusRule、状态护栏（逆跳/解析退化拦截）、自动同步降频 3h、glm-4-flash 在线标定通过（三真实站验证）
+- [ ] **M3 清理与上线**：旧架构代码删除（scheduler/adapters/llm 配方部分/bind 流程）、扩展 popup 纯配对化、前端 Onboarding 弹窗、e2e 按快照链路重写、境内部署 + 备案
